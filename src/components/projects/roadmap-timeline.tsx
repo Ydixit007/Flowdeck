@@ -14,6 +14,8 @@ interface Milestone {
 }
 
 const MIN_SPAN_MS = 14 * 86_400_000;
+/** Width of the left gutter holding task names, so bars start after it. */
+const LABEL_COL = "11rem";
 
 /**
  * Deliberately simple roadmap: one row per scheduled task, positioned on a
@@ -74,19 +76,23 @@ export function RoadmapTimeline({
 
   const percentFor = (stamp: number): number => ((stamp - bounds.min) / bounds.span) * 100;
 
-  const monthTicks: Array<{ label: string; left: number }> = [];
+  // A roadmap spanning days needs day ticks; one spanning months needs months.
+  // Month labels alone leave a short range with a single tick and no scale.
+  const stepDays = bounds.span <= 21 * 86_400_000 ? 1 : bounds.span <= 120 * 86_400_000 ? 7 : 0;
+  const ticks: Array<{ label: string; left: number }> = [];
   {
     const cursor = new Date(bounds.min);
-    cursor.setUTCDate(1);
     cursor.setUTCHours(12, 0, 0, 0);
+    if (stepDays === 0) cursor.setUTCDate(1);
     while (cursor.getTime() <= bounds.max) {
       if (cursor.getTime() >= bounds.min) {
-        monthTicks.push({
-          label: formatInTimeZone(cursor, timeZone, "MMM"),
+        ticks.push({
+          label: formatInTimeZone(cursor, timeZone, stepDays === 0 ? "MMM" : "d MMM"),
           left: percentFor(cursor.getTime()),
         });
       }
-      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      if (stepDays === 0) cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      else cursor.setUTCDate(cursor.getUTCDate() + stepDays);
     }
   }
 
@@ -94,69 +100,90 @@ export function RoadmapTimeline({
 
   return (
     <div className="fd-panel overflow-hidden">
-      <div className="relative border-b border-border px-4 py-1.5">
-        {monthTicks.map((tick) => (
-          <span
-            key={`${tick.label}-${tick.left}`}
-            className="absolute top-1.5 text-[10px] uppercase tracking-wide text-muted-foreground"
-            style={{ left: `calc(${tick.left}% + 1rem)` }}
-          >
-            {tick.label}
-          </span>
-        ))}
-        <div className="h-4" />
+      {/* Header: label gutter, then the shared time axis. */}
+      <div className="flex border-b border-border">
+        <div className="shrink-0" style={{ width: LABEL_COL }} />
+        <div className="relative h-6 min-w-0 flex-1">
+          {ticks.map((tick) => (
+            <span
+              key={`${tick.label}-${tick.left}`}
+              className="absolute top-1 -translate-x-1/2 whitespace-nowrap text-[10px] uppercase tracking-wide text-muted-foreground"
+              style={{ left: `${tick.left}%` }}
+            >
+              {tick.label}
+            </span>
+          ))}
+        </div>
       </div>
 
-      <div className="relative px-4 py-3">
-        {/* Milestone markers span the full height of the plot. */}
-        {milestones
-          .filter((milestone) => milestone.targetDate)
-          .map((milestone) => (
-            <div
-              key={milestone._id}
-              className="pointer-events-none absolute inset-y-0 z-10 border-l border-dashed border-warning/70"
-              style={{ left: `calc(${percentFor(new Date(milestone.targetDate as string).getTime())}% + 1rem)` }}
-            >
-              <span className="absolute -top-0.5 left-1 whitespace-nowrap text-[10px] font-medium text-warning">
-                {milestone.title}
-              </span>
+      <div className="flex py-2">
+        <div className="shrink-0" style={{ width: LABEL_COL }}>
+          {rows.map((item) => (
+            <div key={`label-${item.id}`} className="flex h-7 items-center px-3">
+              <button
+                type="button"
+                onClick={() => onSelect(item.id)}
+                title={item.title}
+                className="truncate text-left text-[11.5px] text-muted-foreground hover:text-foreground"
+              >
+                {item.title}
+              </button>
             </div>
           ))}
+        </div>
 
-        {nowLeft >= 0 && nowLeft <= 100 ? (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-y-0 z-10 border-l border-destructive"
-            style={{ left: `calc(${nowLeft}% + 1rem)` }}
-          />
-        ) : null}
+        {/* Plot area: every % below is relative to this box, not the panel. */}
+        <div className="relative min-w-0 flex-1 border-l border-border">
+          {milestones
+            .filter((milestone) => milestone.targetDate)
+            .map((milestone) => (
+              <div
+                key={milestone._id}
+                className="pointer-events-none absolute inset-y-0 z-10 border-l border-dashed border-warning/70"
+                style={{ left: `${percentFor(new Date(milestone.targetDate as string).getTime())}%` }}
+              >
+                <span className="absolute -top-0.5 left-1 whitespace-nowrap text-[10px] font-medium text-warning">
+                  {milestone.title}
+                </span>
+              </div>
+            ))}
 
-        <ul className="space-y-1">
+          {nowLeft >= 0 && nowLeft <= 100 ? (
+            <div
+              aria-hidden
+              title="Today"
+              className="pointer-events-none absolute inset-y-0 z-10 border-l border-destructive"
+              style={{ left: `${nowLeft}%` }}
+            />
+          ) : null}
+
           {rows.map((item) => {
             const start = new Date(item.startAt ?? (item.dueAt as string)).getTime();
             const end = new Date(item.dueAt ?? item.startAt ?? "").getTime();
             const left = percentFor(start);
-            const width = Math.max(1.5, percentFor(Math.max(end, start + 3_600_000)) - left);
+            // Clamped so a bar never runs past the right edge of the plot.
+            const width = Math.min(Math.max(1, percentFor(end) - left), 100 - left);
+            const done = item.status === "DONE";
             return (
-              <li key={item.id} className="relative h-7">
+              <div key={item.id} className="relative h-7">
                 <button
                   type="button"
                   onClick={() => onSelect(item.id)}
-                  title={item.title}
-                  className="absolute top-1 flex h-5 items-center overflow-hidden rounded px-1.5 text-left text-[10.5px] font-medium text-white transition-opacity hover:opacity-90"
+                  title={`${item.title} · ${formatInTimeZone(start, timeZone, "d MMM")}${
+                    item.dueAt ? ` – ${formatInTimeZone(end, timeZone, "d MMM")}` : ""
+                  }`}
+                  className="absolute top-1.5 h-4 rounded-sm transition-opacity hover:opacity-80"
                   style={{
                     left: `${left}%`,
                     width: `${width}%`,
-                    minWidth: "4rem",
-                    background: item.status === "DONE" ? "var(--muted-foreground)" : color,
+                    background: done ? "var(--muted-foreground)" : color,
+                    opacity: done ? 0.5 : 1,
                   }}
-                >
-                  <span className="truncate">{item.title}</span>
-                </button>
-              </li>
+                />
+              </div>
             );
           })}
-        </ul>
+        </div>
       </div>
     </div>
   );

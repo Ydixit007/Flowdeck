@@ -80,6 +80,9 @@ export interface NotificationDoc {
   url?: string | null;
   taskId?: Types.ObjectId | null;
   readAt?: Date | null;
+  /** Set when the user dismissed or cleared it. The row survives so notify()'s
+   *  dedupe still sees it; clearing the list must not re-arm the reminder. */
+  dismissedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,11 +97,12 @@ const notificationSchema = new Schema<NotificationDoc>(
     url: { type: String, default: null },
     taskId: { type: Schema.Types.ObjectId, ref: "Task", default: null },
     readAt: { type: Date, default: null },
+    dismissedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
 
-notificationSchema.index({ userId: 1, readAt: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, dismissedAt: 1, readAt: 1, createdAt: -1 });
 // Backs the dedupe lookup in notify().
 notificationSchema.index({ userId: 1, kind: 1, taskId: 1, createdAt: -1 });
 

@@ -13,6 +13,21 @@ import {
 
 export const objectId = z.string().regex(/^[a-f\d]{24}$/i, "Invalid id");
 
+/**
+ * Partial for PATCH bodies. `.partial()` alone keeps each field's `.default()`,
+ * which fires on absence -- so patching one field silently resets every other
+ * defaulted one. Stripping the defaults first makes absent mean untouched.
+ */
+function patchable<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
+  const shape = Object.fromEntries(
+    Object.entries(schema.shape).map(([key, field]) => [
+      key,
+      field instanceof z.ZodDefault ? field.def.innerType : field,
+    ]),
+  ) as T;
+  return z.object(shape).partial();
+}
+
 /** Query shape for every endpoint scoped to a single workspace. */
 export const workspaceQuerySchema = z.object({ workspaceId: objectId });
 const optionalId = objectId.nullish();
@@ -127,9 +142,7 @@ export const createTaskSchema = z.object({
   dev: devMetaSchema.partial().nullish(),
 });
 
-export const updateTaskSchema = createTaskSchema
-  .omit({ workspaceId: true })
-  .partial()
+export const updateTaskSchema = patchable(createTaskSchema.omit({ workspaceId: true }))
   .extend({
     subtasks: z
       .array(
@@ -176,7 +189,7 @@ export const createProjectSchema = z.object({
   repoUrl: z.string().url().max(500).nullish(),
 });
 
-export const updateProjectSchema = createProjectSchema.omit({ workspaceId: true }).partial();
+export const updateProjectSchema = patchable(createProjectSchema.omit({ workspaceId: true }));
 
 export const milestoneSchema = z.object({
   title: z.string().trim().min(1).max(140),

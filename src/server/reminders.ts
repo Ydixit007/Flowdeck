@@ -51,7 +51,8 @@ export async function runRemindersForUser(user: AuthUser, now = new Date()): Pro
   const starting = await Task.find({
     ...mine,
     $or: [
-      { recurrence: null, startAt: { $gte: earliest, $lte: latest } },
+      // All-day tasks have no start time to announce.
+      { recurrence: null, allDay: { $ne: true }, startAt: { $gte: earliest, $lte: latest } },
       // A series can only produce an occurrence now if it began before then.
       { recurrence: { $ne: null }, startAt: { $lte: latest } },
     ],
@@ -106,7 +107,10 @@ export async function runRemindersForUser(user: AuthUser, now = new Date()): Pro
   ];
 
   for (const rule of deadlines) {
-    const tasks = await Task.find({ ...mine, recurrence: null, dueAt: rule.range })
+    // An all-day task has dueAt at local midnight, so a clock comparison would
+    // call it due (then overdue) at 00:00 on its own day. It is late only once
+    // the whole day has passed, which the day-end shift below applies.
+    const tasks = await Task.find({ ...mine, recurrence: null, allDay: { $ne: true }, dueAt: rule.range })
       .select("title workspaceId dueAt scheduleTimezone")
       .limit(MAX_TASKS)
       .lean();
@@ -126,6 +130,36 @@ export async function runRemindersForUser(user: AuthUser, now = new Date()): Pro
       });
       result[rule.counter] += 1;
     }
+  }
+
+  // --- All-day tasks, overdue once their day is over -----------------------
+  // Dated, not timed: nothing fires while the day is still running.
+  const dayEnded = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const lateAllDay = await Task.find({
+    ...mine,
+    recurrence: null,
+    allDay: true,
+    dueAt: { $gte: new Date(now.getTime() - OVERDUE_LOOKBACK_MS * 30), $lte: dayEnded },
+  })
+    .select("title workspaceId dueAt scheduleTimezone")
+    .limit(MAX_TASKS)
+    .lean();
+
+  for (const task of lateAllDay) {
+    await notify({
+      userId: user._id,
+      workspaceId: task.workspaceId,
+      kind: "TASK_OVERDUE",
+      title: `Overdue: ${task.title}`,
+      body: task.dueAt
+        ? formatTz(new Date(task.dueAt), resolveTimezone(task.scheduleTimezone), "d MMM")
+        : null,
+      url: `/tasks?task=${task._id.toString()}`,
+      // One nudge per day per task, however often the client polls.
+      dedupeWindowMs: OVERDUE_LOOKBACK_MS,
+      taskId: task._id,
+    });
+    result.overdue += 1;
   }
 
   return result;

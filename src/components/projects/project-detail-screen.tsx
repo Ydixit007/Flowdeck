@@ -29,9 +29,10 @@ import { EmptyState, Progress, Separator, Skeleton, Tabs, TabsList, TabsTrigger 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TaskBlock } from "@/components/calendar/task-block";
 import { TaskDetailPanel } from "@/components/tasks/task-detail-panel";
-import { ProjectIcon } from "@/components/layout/project-icon";
+import { ProjectIcon, PROJECT_ICON_NAMES, PROJECT_COLORS } from "@/components/layout/project-icon";
 import { PROJECT_STATUSES } from "@/lib/types";
 import { RoadmapTimeline } from "@/components/projects/roadmap-timeline";
+import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 
 type Tab = "overview" | "backlog" | "active" | "roadmap";
 
@@ -50,6 +51,7 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
 
   const [tab, setTab] = React.useState<Tab>("overview");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [activity, setActivity] = React.useState<ActivityRow[]>([]);
   const [actors, setActors] = React.useState<UserRef[]>([]);
 
@@ -151,12 +153,58 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
     <div className="mx-auto w-full max-w-6xl space-y-4 p-3 sm:p-5">
       <header className="fd-panel p-4">
         <div className="flex flex-wrap items-start gap-3">
-          <span
-            className="flex size-10 shrink-0 items-center justify-center rounded-xl"
-            style={{ background: `${project.color}1a` }}
-          >
-            <ProjectIcon name={project.icon} color={project.color} className="size-5" />
-          </span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label="Change project icon and colour"
+                title="Change icon and colour"
+                className="flex size-10 shrink-0 items-center justify-center rounded-xl transition-opacity hover:opacity-80"
+                style={{ background: `${project.color}1a` }}
+              >
+                <ProjectIcon name={project.icon} color={project.color} className="size-5" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 space-y-3 p-3">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Icon</Label>
+                <div className="flex flex-wrap gap-1">
+                  {PROJECT_ICON_NAMES.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => void updateProject({ icon: name })}
+                      aria-pressed={project.icon === name}
+                      aria-label={name}
+                      className={`flex size-8 items-center justify-center rounded-md border transition-colors ${
+                        project.icon === name ? "border-primary bg-accent" : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      <ProjectIcon name={name} color={project.color} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">Colour</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PROJECT_COLORS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => void updateProject({ color: value })}
+                      aria-pressed={project.color === value}
+                      aria-label={`Colour ${value}`}
+                      className={`size-6 rounded-full border-2 transition-transform ${
+                        project.color === value ? "scale-110 border-foreground" : "border-transparent"
+                      }`}
+                      style={{ background: value }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
           <div className="min-w-0 flex-1">
             <h1 className="text-base font-semibold tracking-tight">{project.name}</h1>
             {project.description ? (
@@ -200,6 +248,14 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
             </NativeSelect>
             <Button size="sm" onClick={() => openQuickAdd({ projectId })}>
               <Plus /> Task
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Delete project"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 />
             </Button>
           </div>
         </div>
@@ -367,6 +423,13 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
       )}
 
       <TaskDetailPanel itemId={selectedId} onClose={() => setSelectedId(null)} onChanged={() => void reload()} />
+
+      <DeleteProjectDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        projectId={projectId}
+        projectName={project.name}
+      />
     </div>
   );
 }

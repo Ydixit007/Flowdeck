@@ -15,6 +15,18 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/** Shared by the create form and the project header picker. */
+export const PROJECT_COLORS = [
+  "#6366f1",
+  "#0ea5e9",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#a855f7",
+  "#ec4899",
+  "#64748b",
+];
+
 /** Small curated set — a full icon picker is not worth the bundle. */
 export const PROJECT_ICONS: Record<string, LucideIcon> = {
   Folder,

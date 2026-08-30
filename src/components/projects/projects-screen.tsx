@@ -23,9 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ProjectIcon, PROJECT_ICON_NAMES } from "@/components/layout/project-icon";
+import { ProjectIcon, PROJECT_ICON_NAMES, PROJECT_COLORS } from "@/components/layout/project-icon";
 
-const COLORS = ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#a855f7", "#ec4899", "#64748b"];
 
 export function ProjectsScreen() {
   const { projects, user } = useApp();
@@ -149,7 +148,7 @@ function CreateProjectDialog({
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [icon, setIcon] = React.useState("Folder");
-  const [color, setColor] = React.useState(COLORS[0] as string);
+  const [color, setColor] = React.useState(PROJECT_COLORS[0] as string);
   const [status, setStatus] = React.useState("ACTIVE");
   const [targetDate, setTargetDate] = React.useState("");
   const [isContentProject, setIsContentProject] = React.useState(false);
@@ -237,7 +236,7 @@ function CreateProjectDialog({
             <div className="space-y-1.5">
               <Label>Colour</Label>
               <div className="flex flex-wrap gap-1.5">
-                {COLORS.map((value) => (
+                {PROJECT_COLORS.map((value) => (
                   <button
                     key={value}
                     type="button"

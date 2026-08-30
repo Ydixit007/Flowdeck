@@ -537,6 +537,27 @@ export function TaskDetailPanel({
                     />
                   </Field>
 
+                  {/* Mirrors the quick-add toggle so a task can move between
+                      all-day and timed after it exists. */}
+                  <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={!task.allDay}
+                      onChange={(e) => {
+                        const allDay = !e.target.checked;
+                        const shift = (value?: string | null): string | null => {
+                          if (!value) return null;
+                          const local = localInputValue(new Date(value), user.timezone, false);
+                          const next = allDay ? local.slice(0, 10) : `${local.slice(0, 10)}T09:00`;
+                          return parseLocalInput(next, user.timezone, allDay).toISOString();
+                        };
+                        edit({ allDay, startAt: shift(task.startAt), dueAt: shift(task.dueAt) });
+                      }}
+                      className="size-3.5 accent-[var(--primary)]"
+                    />
+                    Set a time of day
+                  </label>
+
                   {/* All-day tasks still have a deadline; only the time is dropped. */}
                   <Field label={task.allDay ? "Due date" : "Ends"}>
                     <Input

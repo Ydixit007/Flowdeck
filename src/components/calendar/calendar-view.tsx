@@ -48,11 +48,14 @@ export function CalendarView({
     const { taskId, occurrenceStart } = splitItemId(item.id);
     void mutateItem(
       item.id,
-      { startAt: startAt.toISOString(), dueAt: dueAt?.toISOString() ?? null },
+      // Dropping onto the time grid gives the task a clock time, so it stops
+      // being all-day; without this it renders in both rows at once.
+      { startAt: startAt.toISOString(), dueAt: dueAt?.toISOString() ?? null, allDay: false },
       () =>
         api.patch(`/api/tasks/${taskId}`, {
           startAt: startAt.toISOString(),
           dueAt: dueAt?.toISOString() ?? null,
+          allDay: false,
           // Dragging one date of a series edits just that occurrence.
           scope: occurrenceStart ? "OCCURRENCE" : "SERIES",
           occurrenceStart,
