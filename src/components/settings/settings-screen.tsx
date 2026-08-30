@@ -22,8 +22,6 @@ const KIND_LABELS: Record<NotificationKind, string> = {
   MENTION: "Someone mentions me",
   COMMENT: "Comments on my tasks",
   DEADLINE: "Upcoming deadline",
-  DAILY_AGENDA: "Daily agenda",
-  WEEKLY_PLANNING: "Weekly planning reminder",
 };
 
 const TIMEZONES = [
@@ -278,37 +276,6 @@ function NotificationSection() {
 
       <div className="space-y-3 p-4">
         <h2 className="text-[13px] font-semibold">Timing</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-time">Remind me before a task starts</Label>
-            <NativeSelect
-              id="lead-time"
-              value={String(prefs.taskStartingLeadMinutes)}
-              onChange={(event) => void update({ taskStartingLeadMinutes: Number(event.target.value) })}
-            >
-              {[0, 5, 10, 15, 30, 60].map((minutes) => (
-                <option key={minutes} value={minutes}>
-                  {minutes === 0 ? "At start time" : `${minutes} minutes before`}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="agenda-hour">Daily agenda at</Label>
-            <NativeSelect
-              id="agenda-hour"
-              value={String(prefs.dailyAgendaHour)}
-              onChange={(event) => void update({ dailyAgendaHour: Number(event.target.value) })}
-            >
-              {Array.from({ length: 24 }, (_, hour) => (
-                <option key={hour} value={hour}>
-                  {String(hour).padStart(2, "0")}:00
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-        </div>
-
         <Row label="Quiet hours" description="Push is held back inside this window.">
           <Switch
             checked={prefs.quietHours.enabled}

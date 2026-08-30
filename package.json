@@ -8,7 +8,6 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx scripts/seed.ts",
     "test": "tsx --test src/**/*.test.ts",
     "indexes": "tsx scripts/indexes.ts"
   },
@@ -33,7 +32,6 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "bcryptjs": "^3.0.3",
-    "chrono-node": "^2.10.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

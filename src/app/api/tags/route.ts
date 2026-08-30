@@ -3,14 +3,14 @@ import { z } from "zod";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { handleError, ok, parseBody, parseQuery } from "@/lib/api";
-import { createTagSchema, objectId } from "@/lib/validation";
+import { createTagSchema, workspaceQuerySchema } from "@/lib/validation";
 import { requireMembership } from "@/server/authz";
 import { Tag } from "@/models/Tag";
 
 export async function GET(request: NextRequest) {
   try {
     const user = await requireUser();
-    const { workspaceId } = parseQuery(request, z.object({ workspaceId: objectId }));
+    const { workspaceId } = parseQuery(request, workspaceQuerySchema);
     const membership = await requireMembership(user, workspaceId);
     await connectDB();
     const tags = await Tag.find({ workspaceId: membership.workspaceId }).sort({ name: 1 }).lean();

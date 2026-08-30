@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
-import { Bell, BellRing, CheckCheck } from "lucide-react";
+import { Bell, BellRing, CheckCheck, X, Trash2 } from "lucide-react";
 import { api } from "@/lib/client/api";
 import { useApp } from "@/lib/client/store";
 import { Button } from "@/components/ui/button";
@@ -41,11 +41,30 @@ export function NotificationsMenu() {
     }
   }, [setUnreadCount]);
 
+  /** Background poll only needs the badge number, not fifty rows nobody is
+   *  looking at; the full list loads when the menu opens. */
+  const loadCount = React.useCallback(async () => {
+    if (document.visibilityState !== "visible") return;
+    try {
+      // There is no cron: this poll is the clock that fires start, due and
+      // overdue reminders. Sends are deduped server-side.
+      await api.post("/api/reminders", {}).catch(() => undefined);
+      const data = await api.get<{ unreadCount: number }>("/api/notifications?countOnly=true");
+      setUnreadCount(data.unreadCount);
+    } catch {
+      // Offline or signed out: keep the last known count.
+    }
+  }, [setUnreadCount]);
+
   React.useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [load]);
+    void loadCount();
+    const timer = window.setInterval(() => void loadCount(), POLL_MS);
+    document.addEventListener("visibilitychange", loadCount);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", loadCount);
+    };
+  }, [loadCount]);
 
   React.useEffect(() => {
     if (open) {
@@ -59,6 +78,28 @@ export function NotificationsMenu() {
     setUnreadCount(0);
     try {
       await api.patch("/api/notifications", { all: true });
+    } catch {
+      void load();
+    }
+  };
+
+  /** Optimistic: drop the row now, reload from the server if the call fails. */
+  const dismiss = async (id: string): Promise<void> => {
+    const removed = rows.find((row) => row.id === id);
+    setRows((current) => current.filter((row) => row.id !== id));
+    if (removed && !removed.readAt) setUnreadCount(Math.max(0, unreadCount - 1));
+    try {
+      await api.delete(`/api/notifications?id=${id}`);
+    } catch {
+      void load();
+    }
+  };
+
+  const clearAll = async (): Promise<void> => {
+    setRows([]);
+    setUnreadCount(0);
+    try {
+      await api.delete("/api/notifications?all=true");
     } catch {
       void load();
     }
@@ -79,11 +120,18 @@ export function NotificationsMenu() {
       <PopoverContent align="end" className="w-[22rem] p-0">
         <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
           <p className="text-[13px] font-semibold">Notifications</p>
-          {rows.some((row) => !row.readAt) ? (
-            <Button variant="ghost" size="sm" onClick={() => void markAllRead()}>
-              <CheckCheck /> Mark all read
-            </Button>
-          ) : null}
+          <div className="flex items-center gap-0.5">
+            {rows.some((row) => !row.readAt) ? (
+              <Button variant="ghost" size="sm" onClick={() => void markAllRead()}>
+                <CheckCheck /> Mark all read
+              </Button>
+            ) : null}
+            {rows.length > 0 ? (
+              <Button variant="ghost" size="sm" onClick={() => void clearAll()} aria-label="Clear all notifications">
+                <Trash2 /> Clear
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         <PushPrompt />
@@ -105,11 +153,11 @@ export function NotificationsMenu() {
           ) : (
             <ul className="divide-y divide-border">
               {rows.map((row) => (
-                <li key={row.id}>
+                <li key={row.id} className="group relative">
                   <Link
                     href={row.url ?? "#"}
                     onClick={() => setOpen(false)}
-                    className="flex gap-2.5 px-3 py-2.5 transition-colors hover:bg-muted"
+                    className="flex gap-2.5 px-3 py-2.5 pr-9 transition-colors hover:bg-muted"
                   >
                     <span
                       aria-hidden
@@ -125,6 +173,14 @@ export function NotificationsMenu() {
                       </span>
                     </span>
                   </Link>
+                  <button
+                    type="button"
+                    aria-label="Dismiss notification"
+                    onClick={() => void dismiss(row.id)}
+                    className="absolute right-2 top-2 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <X className="size-3.5" />
+                  </button>
                 </li>
               ))}
             </ul>

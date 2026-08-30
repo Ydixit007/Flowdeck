@@ -1,14 +1,10 @@
 import type { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { fail, handleError, ok } from "@/lib/api";
+import { fail, handleError, ok, requireIdParam, type RouteContext } from "@/lib/api";
 import { requireTaskAccess } from "@/server/authz";
 import { Attachment } from "@/models/Social";
 import { Task } from "@/models/Task";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 const MAX_BYTES = 4_000_000;
 
@@ -60,8 +56,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const user = await requireUser();
     const { id } = await context.params;
     const { task } = await requireTaskAccess(user, id, "write");
-    const attachmentId = new URL(request.url).searchParams.get("attachmentId");
-    if (!attachmentId) return fail("attachmentId is required", "VALIDATION_ERROR", 422);
+    const attachmentId = requireIdParam(request, "attachmentId");
     await connectDB();
     await Attachment.deleteOne({ _id: attachmentId, taskId: task._id });
     await Task.updateOne({ _id: task._id }, { $pull: { attachmentIds: attachmentId } });

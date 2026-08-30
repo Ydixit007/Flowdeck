@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/client/api";
+import { useApp } from "@/lib/client/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,7 @@ export function CreateWorkspaceDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
+  const { refreshWorkspaces, setWorkspaceId } = useApp();
   const [name, setName] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
@@ -33,7 +35,12 @@ export function CreateWorkspaceDialog({
     if (!name.trim()) return;
     setSaving(true);
     try {
-      await api.post("/api/workspaces", { name: name.trim() });
+      const { workspace } = await api.post<{ workspace: { id: string } }>("/api/workspaces", {
+        name: name.trim(),
+      });
+      await refreshWorkspaces();
+      // Land in the workspace that was just created, not the previous one.
+      setWorkspaceId(workspace.id);
       toast.success("Workspace created");
       setName("");
       onOpenChange(false);

@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
@@ -68,7 +69,7 @@ export type AuthUser = Omit<UserDoc, "passwordHash">;
 
 /** Returns the authenticated user, or null. Revalidates sessionEpoch so a
  *  password change invalidates every previously issued cookie. */
-export async function getCurrentUser(): Promise<AuthUser | null> {
+export const getCurrentUser = cache(async function getCurrentUser(): Promise<AuthUser | null> {
   const session = await readSession();
   if (!session) return null;
   await connectDB();
@@ -76,7 +77,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   if (!user) return null;
   if ((user.sessionEpoch ?? 0) !== session.epoch) return null;
   return user;
-}
+});
 
 export async function requireUser(): Promise<AuthUser> {
   const user = await getCurrentUser();

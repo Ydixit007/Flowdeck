@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { fail, handleError, ok, parseBody, parseQuery } from "@/lib/api";
 import { createTaskSchema, taskQuerySchema } from "@/lib/validation";
 import { requireMembership, taskVisibilityFilter } from "@/server/authz";
+import { andFilters } from "@/lib/filters";
 import { Task, TaskOccurrence, type TaskDoc, type TaskOccurrenceDoc } from "@/models/Task";
 import { asArray, buildCalendarItems, windowQuery } from "@/server/tasks";
 import { logActivity } from "@/server/activity";
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
 
     // Inbox mode: unscheduled items only, no occurrence expansion needed.
     if (query.unscheduled === "true") {
-      const tasks = await Task.find({ ...filter, startAt: null, dueAt: null })
+      const tasks = await Task.find(andFilters(filter, { startAt: null, dueAt: null }))
         .sort({ createdAt: -1 })
         .limit(query.limit ?? 200)
         .lean<TaskDoc[]>();
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
     }
 
     const window = { from: query.from, to: query.to };
-    const tasks = await Task.find({ ...filter, ...windowQuery(window) })
+    const tasks = await Task.find(andFilters(filter, windowQuery(window)))
       .limit(query.limit ?? 500)
       .lean<TaskDoc[]>();
     const overrides = await TaskOccurrence.find({

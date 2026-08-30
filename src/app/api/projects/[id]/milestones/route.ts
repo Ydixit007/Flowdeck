@@ -1,14 +1,10 @@
 import type { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { fail, handleError, ok, parseBody } from "@/lib/api";
+import { fail, handleError, ok, parseBody, requireIdParam, type RouteContext } from "@/lib/api";
 import { milestoneSchema } from "@/lib/validation";
 import { requireProject } from "@/server/authz";
 import { Project } from "@/models/Project";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -35,8 +31,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const user = await requireUser();
     const { id } = await context.params;
     const { project } = await requireProject(user, id, "MEMBER");
-    const milestoneId = new URL(request.url).searchParams.get("milestoneId");
-    if (!milestoneId) return fail("milestoneId is required", "VALIDATION_ERROR", 422);
+    const milestoneId = requireIdParam(request, "milestoneId");
     await connectDB();
     const updated = await Project.findByIdAndUpdate(
       project._id,

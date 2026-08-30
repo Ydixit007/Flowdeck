@@ -22,9 +22,6 @@ export async function PATCH(request: NextRequest) {
     const merged = {
       channels: { ...current.channels, ...input.channels },
       kinds,
-      taskStartingLeadMinutes: input.taskStartingLeadMinutes ?? current.taskStartingLeadMinutes,
-      dailyAgendaHour: input.dailyAgendaHour ?? current.dailyAgendaHour,
-      weeklyPlanningWeekday: input.weeklyPlanningWeekday ?? current.weeklyPlanningWeekday,
       quietHours: { ...current.quietHours, ...input.quietHours },
     };
 

@@ -27,20 +27,15 @@ cp .env.example .env.local
 # 3. MongoDB (see "MongoDB setup" if you do not have one running)
 mongod --dbpath ~/data/db          # or: brew services start mongodb-community
 
-# 4. Seed development data
-npm run seed
+# 4. Build indexes (required once per database)
+npm run indexes
 
 # 5. Run
 npm run dev                        # http://localhost:3000
 ```
 
-Seeded accounts (all with password `flowdeck123`):
-
-| Email | Role |
-| --- | --- |
-| `yash@bassforecast.com` | Workspace owner |
-| `alex@example.com` | Member |
-| `rahul@example.com` | Member |
+Register an account at `/register` on first run; the first account creates its
+own workspace.
 
 ---
 
@@ -53,7 +48,6 @@ Seeded accounts (all with password `flowdeck123`):
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | for push | Public VAPID key, exposed to the browser |
 | `VAPID_PRIVATE_KEY` | for push | Private VAPID key, server only |
 | `VAPID_SUBJECT` | for push | `mailto:you@example.com` |
-| `CRON_SECRET` | for reminders | Shared secret guarding `/api/cron/reminders` |
 
 Never commit `.env.local`. It is gitignored; `.env.example` is the template.
 
@@ -105,25 +99,6 @@ Permission is requested **contextually** — the opt-in appears inside the
 notifications panel, not on first page load. Without VAPID keys the app runs
 normally and simply falls back to in-app notifications.
 
-### Reminder delivery
-
-Reminders, overdue alerts and daily agendas are delivered by a sweep endpoint that
-you call on a schedule:
-
-```bash
-curl -H "Authorization: Bearer $CRON_SECRET" https://your-host/api/cron/reminders
-```
-
-Run it every 5–10 minutes. Options: Vercel Cron, a systemd timer, a GitHub Action,
-or `cron`:
-
-```cron
-*/5 * * * * curl -sS -H "Authorization: Bearer SECRET" https://your-host/api/cron/reminders
-```
-
-The sweep is idempotent — per-occurrence markers and a per-kind dedupe window mean
-repeated runs never send the same notification twice.
-
 ---
 
 ## PWA setup
@@ -154,7 +129,7 @@ npm start           # serve the production build
 npm run typecheck   # tsc --noEmit (strict)
 npm run lint        # eslint
 npm run test        # unit tests (recurrence + natural-language parser)
-npm run seed        # (re)seed development data
+npm run indexes     # build MongoDB indexes (after a schema change, or on a new database)
 ```
 
 ---

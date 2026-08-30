@@ -1,150 +1,130 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
 import { Task, TaskOccurrence, type TaskDoc } from "@/models/Task";
-import { User } from "@/models/User";
+import { connectDB } from "@/lib/db";
+import type { AuthUser } from "@/lib/auth";
 import { notify } from "@/server/notifications";
 import { expandOccurrences } from "@/lib/recurrence";
-import { formatTz, resolveTimezone, toWallClock, weekdayInTz } from "@/lib/tz";
+import { formatTz, resolveTimezone } from "@/lib/tz";
+import { shouldFire, REMINDER_GRACE_MS } from "@/lib/reminder-window";
+import { occurrenceKey } from "@/server/tasks";
 
 export interface ReminderRunResult {
   starting: number;
+  due: number;
   overdue: number;
-  agendas: number;
 }
 
+const GRACE_MS = REMINDER_GRACE_MS;
 const LOOKAHEAD_MS = 60 * 60 * 1000;
+const OVERDUE_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const OPEN = { $in: ["TODO", "IN_PROGRESS"] as const };
+const MAX_TASKS = 200;
+
+/** Occurrence starts that must not nag: skipped, done or cancelled. */
+async function silencedKeys(tasks: TaskDoc[]): Promise<Set<string>> {
+  if (tasks.length === 0) return new Set();
+  const overrides = await TaskOccurrence.find({
+    taskId: { $in: tasks.map((t) => t._id) },
+    $or: [{ skipped: true }, { status: { $in: ["DONE", "CANCELLED"] } }],
+  })
+    .select("taskId occurrenceStart")
+    .lean();
+  return new Set(overrides.map((o) => occurrenceKey(o.taskId.toString(), new Date(o.occurrenceStart))));
+}
 
 /**
- * Sweeps for reminders that are due now. Designed to be called every few
- * minutes by a cron job; each reminder records the occurrence it fired for so
- * repeated runs cannot double-send.
+ * Sends the time-based reminders this user is owed right now. Called by the
+ * client poll, so it is scoped to one user rather than sweeping everybody.
+ * Every send is deduped, so polling often cannot double-notify.
  */
-export async function runReminderSweep(now = new Date()): Promise<ReminderRunResult> {
+export async function runRemindersForUser(user: AuthUser, now = new Date()): Promise<ReminderRunResult> {
   await connectDB();
-  const result: ReminderRunResult = { starting: 0, overdue: 0, agendas: 0 };
+  const result: ReminderRunResult = { starting: 0, due: 0, overdue: 0 };
 
-  // --- Task starting soon ---------------------------------------------------
-  const candidates = await Task.find({
-    status: { $in: ["TODO", "IN_PROGRESS"] },
-    "reminders.0": { $exists: true },
+  // Only what is assigned to this user: the creator already gets an assignment
+  // notification and should not be nagged about someone else's schedule.
+  const mine = { assigneeId: user._id, status: OPEN };
+  const earliest = new Date(now.getTime() - GRACE_MS);
+  const latest = new Date(now.getTime() + LOOKAHEAD_MS);
+
+  // --- Starting now --------------------------------------------------------
+  const starting = await Task.find({
+    ...mine,
     $or: [
-      { startAt: { $gte: new Date(now.getTime() - LOOKAHEAD_MS), $lte: new Date(now.getTime() + LOOKAHEAD_MS * 24) } },
-      { recurrence: { $ne: null } },
+      { recurrence: null, startAt: { $gte: earliest, $lte: latest } },
+      // A series can only produce an occurrence now if it began before then.
+      { recurrence: { $ne: null }, startAt: { $lte: latest } },
     ],
-  }).lean<TaskDoc[]>();
+  })
+    .limit(MAX_TASKS)
+    .lean<TaskDoc[]>();
 
-  for (const task of candidates) {
-    const recipientId = task.assigneeId ?? task.creatorId;
+  const silenced = await silencedKeys(starting.filter((t) => t.recurrence));
+
+  for (const task of starting) {
     const anchor = task.startAt ?? task.dueAt;
     if (!anchor) continue;
     const tz = resolveTimezone(task.scheduleTimezone);
-
     const occurrences = task.recurrence
-      ? expandOccurrences(
-          new Date(anchor),
-          task.recurrence,
-          { from: new Date(now.getTime() - LOOKAHEAD_MS), to: new Date(now.getTime() + LOOKAHEAD_MS * 2) },
-          tz,
-        )
+      ? expandOccurrences(new Date(anchor), task.recurrence, { from: earliest, to: latest }, tz)
       : [new Date(anchor)];
 
-    for (const reminder of task.reminders) {
-      for (const occurrence of occurrences) {
-        const fireAt = new Date(occurrence.getTime() - reminder.minutesBefore * 60_000);
-        if (fireAt > now || now.getTime() - fireAt.getTime() > 15 * 60_000) continue;
-        if (
-          reminder.lastSentForOccurrence &&
-          new Date(reminder.lastSentForOccurrence).getTime() === occurrence.getTime()
-        ) {
-          continue;
-        }
-        // Skipped or already-completed occurrences must not nag.
-        const override = await TaskOccurrence.findOne({ taskId: task._id, occurrenceStart: occurrence })
-          .select("skipped status")
-          .lean();
-        if (override?.skipped || override?.status === "DONE" || override?.status === "CANCELLED") continue;
+    for (const occurrence of occurrences) {
+      if (!shouldFire(occurrence, now)) continue;
+      if (silenced.has(occurrenceKey(task._id.toString(), occurrence))) continue;
 
-        await notify({
-          userId: recipientId,
-          workspaceId: task.workspaceId,
-          kind: "TASK_STARTING",
-          title: task.title,
-          body:
-            reminder.minutesBefore === 0
-              ? `Starting now · ${formatTz(occurrence, tz, "HH:mm")}`
-              : `Starts in ${reminder.minutesBefore} min · ${formatTz(occurrence, tz, "HH:mm")}`,
-          url: `/tasks?task=${task._id.toString()}`,
-          taskId: task._id,
-        });
-        await Task.updateOne(
-          { _id: task._id, "reminders._id": reminder._id },
-          { $set: { "reminders.$.lastSentForOccurrence": occurrence } },
-        );
-        result.starting += 1;
-      }
+      await notify({
+        userId: user._id,
+        workspaceId: task.workspaceId,
+        kind: "TASK_STARTING",
+        title: task.title,
+        body: `Starting now · ${formatTz(occurrence, tz, "HH:mm")}`,
+        url: `/tasks?task=${task._id.toString()}`,
+        taskId: task._id,
+        // Keyed to the occurrence: a repeat only re-fires next occurrence.
+        dedupeWindowMs: GRACE_MS + 60_000,
+      });
+      result.starting += 1;
     }
   }
 
-  // --- Overdue -------------------------------------------------------------
-  const overdue = await Task.find({
-    status: { $in: ["TODO", "IN_PROGRESS"] },
-    recurrence: null,
-    dueAt: { $lt: now, $gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
-  })
-    .select("title workspaceId assigneeId creatorId dueAt")
-    .lean();
-
-  for (const task of overdue) {
-    await notify({
-      userId: task.assigneeId ?? task.creatorId,
-      workspaceId: task.workspaceId,
+  // --- Due now, then overdue -----------------------------------------------
+  const deadlines: Array<{
+    kind: "DEADLINE" | "TASK_OVERDUE";
+    range: { $gte: Date; $lte?: Date; $lt?: Date };
+    dedupeWindowMs: number;
+    counter: "due" | "overdue";
+  }> = [
+    { kind: "DEADLINE", range: { $gte: earliest, $lte: now }, dedupeWindowMs: 12 * 60 * 60 * 1000, counter: "due" },
+    {
       kind: "TASK_OVERDUE",
-      title: `Overdue: ${task.title}`,
-      body: "This task passed its due time.",
-      url: `/tasks?task=${task._id.toString()}`,
-      taskId: task._id,
-      // One nudge per day per task, however often the sweep runs.
-      dedupeWindowMs: 24 * 60 * 60 * 1000,
-    });
-    result.overdue += 1;
-  }
+      range: { $gte: new Date(now.getTime() - OVERDUE_LOOKBACK_MS), $lt: earliest },
+      // One nudge per day per task, however often the client polls.
+      dedupeWindowMs: OVERDUE_LOOKBACK_MS,
+      counter: "overdue",
+    },
+  ];
 
-  // --- Daily agenda / weekly planning --------------------------------------
-  const users = await User.find({}).select("name timezone notificationPrefs").lean();
-  for (const user of users) {
-    const tz = resolveTimezone(user.timezone);
-    const wall = toWallClock(now, tz);
-    const prefs = user.notificationPrefs;
-    if (!prefs) continue;
+  for (const rule of deadlines) {
+    const tasks = await Task.find({ ...mine, recurrence: null, dueAt: rule.range })
+      .select("title workspaceId dueAt scheduleTimezone")
+      .limit(MAX_TASKS)
+      .lean();
 
-    if (wall.hour === prefs.dailyAgendaHour && wall.minute < 15) {
-      const dayStart = new Date(now);
-      const count = await Task.countDocuments({
-        $or: [{ assigneeId: user._id }, { creatorId: user._id }],
-        status: { $in: ["TODO", "IN_PROGRESS"] },
-        startAt: { $gte: dayStart, $lte: new Date(dayStart.getTime() + 86_400_000) },
-      });
+    for (const task of tasks) {
       await notify({
         userId: user._id,
-        kind: "DAILY_AGENDA",
-        title: `Good morning, ${user.name.split(" ")[0] ?? user.name}`,
-        body: count > 0 ? `${count} task${count === 1 ? "" : "s"} scheduled today.` : "Nothing scheduled yet today.",
-        url: "/",
-        dedupeWindowMs: 20 * 60 * 60 * 1000,
+        workspaceId: task.workspaceId,
+        kind: rule.kind,
+        title: rule.kind === "DEADLINE" ? `Due now: ${task.title}` : `Overdue: ${task.title}`,
+        body: task.dueAt
+          ? formatTz(new Date(task.dueAt), resolveTimezone(task.scheduleTimezone), "HH:mm")
+          : null,
+        url: `/tasks?task=${task._id.toString()}`,
+        taskId: task._id,
+        dedupeWindowMs: rule.dedupeWindowMs,
       });
-      result.agendas += 1;
-    }
-
-    const weekday = weekdayInTz(now, tz);
-    if (weekday === prefs.weeklyPlanningWeekday && wall.hour === prefs.dailyAgendaHour && wall.minute < 15) {
-      await notify({
-        userId: user._id,
-        kind: "WEEKLY_PLANNING",
-        title: "Plan your week",
-        body: "Review last week and schedule what matters next.",
-        url: "/review",
-        dedupeWindowMs: 6 * 24 * 60 * 60 * 1000,
-      });
+      result[rule.counter] += 1;
     }
   }
 

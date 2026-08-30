@@ -11,6 +11,7 @@ import { fetchUserRefs } from "@/server/users";
 const querySchema = z.object({
   workspaceId: objectId,
   projectId: objectId.optional(),
+  taskId: objectId.optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
     const rows = await Activity.find({
       workspaceId,
       ...(query.projectId ? { projectId: query.projectId } : {}),
+      ...(query.taskId ? { taskId: query.taskId } : {}),
     })
       .sort({ createdAt: -1 })
       .limit(query.limit ?? 40)

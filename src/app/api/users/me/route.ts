@@ -31,7 +31,6 @@ export async function PATCH(request: NextRequest) {
     if (input.name !== undefined) update.name = input.name;
     if (input.username !== undefined) update.username = input.username;
     if (input.bio !== undefined) update.bio = input.bio;
-    if (input.avatar !== undefined) update.avatar = input.avatar;
     if (input.timezone !== undefined) update.timezone = resolveTimezone(input.timezone);
 
     const updated = await User.findByIdAndUpdate(user._id, { $set: update }, { new: true }).lean();

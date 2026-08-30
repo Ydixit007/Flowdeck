@@ -122,6 +122,11 @@ export function TaskDetailPanel({
   const [newSubtask, setNewSubtask] = React.useState("");
   const [scopePrompt, setScopePrompt] = React.useState<null | { apply: (scope: EditScope) => Promise<void> }>(null);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  // Field edits collect here until Save, so typing a description does not write
+  // a row per blur and bury the activity feed under "updated X" entries.
+  const [pending, setPending] = React.useState<Record<string, unknown>>({});
+  const [saving, setSaving] = React.useState(false);
+  const dirty = Object.keys(pending).length > 0;
 
   const load = React.useCallback(async () => {
     if (!taskId) return;
@@ -131,13 +136,13 @@ export function TaskDetailPanel({
         api.get<{ task: TaskDetail }>(`/api/tasks/${taskId}`),
         api.get<{ comments: CommentRow[]; authors: UserRef[] }>(`/api/tasks/${taskId}/comments`),
         api.get<{ activity: ActivityRow[]; actors: UserRef[] }>(
-          `/api/activity?workspaceId=${workspaceId}&limit=60`,
+          `/api/activity?workspaceId=${workspaceId}&taskId=${taskId}&limit=20`,
         ),
       ]);
       setTask(detail.task);
       setComments(commentData.comments);
       setAuthors(commentData.authors);
-      setActivity(activityData.activity.filter((row) => row.summary && true));
+      setActivity(activityData.activity);
       setAuthors((current) => [...current, ...activityData.actors]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load the task");
@@ -179,6 +184,38 @@ export function TaskDetailPanel({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save");
     }
+  };
+
+  /** Buffers a field edit locally; written only when Save is pressed. */
+  const edit = (body: Record<string, unknown>): void => {
+    setTask((current) => (current ? ({ ...current, ...body } as TaskDetail) : current));
+    setPending((current) => ({ ...current, ...body }));
+  };
+
+  const save = async (): Promise<void> => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    const body = pending;
+    setPending({});
+    try {
+      await patch(body);
+    } catch {
+      setPending((current) => ({ ...body, ...current }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const discard = (): void => {
+    setPending({});
+    void load();
+  };
+
+  /** Closing with unsaved field edits writes them, so a close is never a silent
+   *  data loss; one request, not one per field. */
+  const closeWithSave = (): void => {
+    if (dirty) void save();
+    onClose();
   };
 
   const addComment = async (event: React.FormEvent): Promise<void> => {
@@ -243,11 +280,11 @@ export function TaskDetailPanel({
 
   const doneSubtasks = task?.subtasks.filter((s) => s.done).length ?? 0;
   const totalSubtasks = task?.subtasks.length ?? 0;
-  const taskActivity = activity.filter((row) => row.summary.includes(task?.title ?? " "));
+  const taskActivity = activity;
 
   return (
     <>
-      <Dialog open={Boolean(itemId)} onOpenChange={(next) => (next ? undefined : onClose())}>
+      <Dialog open={Boolean(itemId)} onOpenChange={(next) => (next ? undefined : closeWithSave())}>
         <DialogContent size="xl" className="top-[5vh] max-h-[90vh] overflow-hidden p-0" hideClose>
           {loading && !task ? (
             <div className="space-y-3 p-6">
@@ -290,21 +327,31 @@ export function TaskDetailPanel({
                   </Badge>
                 ) : null}
                 <div className="flex-1" />
+                {dirty ? (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={discard} disabled={saving}>
+                      Discard
+                    </Button>
+                    <Button size="sm" onClick={() => void save()} disabled={saving}>
+                      {saving ? "Saving..." : "Save"}
+                    </Button>
+                  </>
+                ) : null}
                 <Button variant="ghost" size="icon-sm" onClick={() => setConfirmDelete(true)} aria-label="Delete task">
                   <Trash2 />
                 </Button>
-                <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
+                <Button variant="ghost" size="icon-sm" onClick={closeWithSave} aria-label="Close">
                   <X />
                 </Button>
               </div>
 
               <div className="fd-scroll-thin grid flex-1 gap-0 overflow-y-auto md:grid-cols-[1fr_17rem]">
                 <div className="min-w-0 space-y-5 p-5">
-                  <InlineTitle value={task.title} onSave={(value) => patch({ title: value })} />
+                  <InlineTitle value={task.title} onSave={(value) => edit({ title: value })} />
 
                   <InlineDescription
                     value={task.description ?? ""}
-                    onSave={(value) => patch({ description: value || null })}
+                    onSave={(value) => edit({ description: value || null })}
                   />
 
                   <section className="space-y-2">
@@ -354,10 +401,10 @@ export function TaskDetailPanel({
                   </section>
 
                   {task.isContent && task.content ? (
-                    <ContentSection task={task} onPatch={patch} />
+                    <ContentSection task={task} onPatch={edit} />
                   ) : null}
 
-                  <DevSection task={task} onPatch={patch} />
+                  <DevSection task={task} onPatch={edit} />
 
                   <Separator />
 
@@ -434,7 +481,7 @@ export function TaskDetailPanel({
                   <Field label="Priority">
                     <NativeSelect
                       value={task.priority}
-                      onChange={(e) => void patch({ priority: e.target.value })}
+                      onChange={(e) => edit({ priority: e.target.value })}
                       className="h-8 text-[12px]"
                     >
                       {PRIORITIES.map((value) => (
@@ -448,7 +495,7 @@ export function TaskDetailPanel({
                   <Field label="Project">
                     <NativeSelect
                       value={task.projectId ?? ""}
-                      onChange={(e) => void patch({ projectId: e.target.value || null })}
+                      onChange={(e) => edit({ projectId: e.target.value || null })}
                       className="h-8 text-[12px]"
                     >
                       <option value="">No project</option>
@@ -463,7 +510,7 @@ export function TaskDetailPanel({
                   <Field label="Assignee">
                     <NativeSelect
                       value={task.assigneeId ?? ""}
-                      onChange={(e) => void patch({ assigneeId: e.target.value || null })}
+                      onChange={(e) => edit({ assigneeId: e.target.value || null })}
                       className="h-8 text-[12px]"
                     >
                       <option value="">Unassigned</option>
@@ -475,13 +522,13 @@ export function TaskDetailPanel({
                     </NativeSelect>
                   </Field>
 
-                  <Field label={task.allDay ? "Date" : "Starts"}>
+                  <Field label={task.allDay ? "Start date" : "Starts"}>
                     <Input
                       type={task.allDay ? "date" : "datetime-local"}
                       className="h-8 text-[12px]"
                       value={task.startAt ? localInputValue(new Date(task.startAt), user.timezone, task.allDay) : ""}
                       onChange={(e) =>
-                        void patch({
+                        edit({
                           startAt: e.target.value
                             ? parseLocalInput(e.target.value, user.timezone, task.allDay).toISOString()
                             : null,
@@ -490,22 +537,21 @@ export function TaskDetailPanel({
                     />
                   </Field>
 
-                  {!task.allDay ? (
-                    <Field label="Ends">
-                      <Input
-                        type="datetime-local"
-                        className="h-8 text-[12px]"
-                        value={task.dueAt ? localInputValue(new Date(task.dueAt), user.timezone) : ""}
-                        onChange={(e) =>
-                          void patch({
-                            dueAt: e.target.value
-                              ? parseLocalInput(e.target.value, user.timezone).toISOString()
-                              : null,
-                          })
-                        }
-                      />
-                    </Field>
-                  ) : null}
+                  {/* All-day tasks still have a deadline; only the time is dropped. */}
+                  <Field label={task.allDay ? "Due date" : "Ends"}>
+                    <Input
+                      type={task.allDay ? "date" : "datetime-local"}
+                      className="h-8 text-[12px]"
+                      value={task.dueAt ? localInputValue(new Date(task.dueAt), user.timezone, task.allDay) : ""}
+                      onChange={(e) =>
+                        edit({
+                          dueAt: e.target.value
+                            ? parseLocalInput(e.target.value, user.timezone, task.allDay).toISOString()
+                            : null,
+                        })
+                      }
+                    />
+                  </Field>
 
                   <div className="grid grid-cols-2 gap-2">
                     <Field label="Estimate (m)">
@@ -516,7 +562,7 @@ export function TaskDetailPanel({
                         className="h-8 text-[12px]"
                         defaultValue={task.estimatedMinutes ?? ""}
                         onBlur={(e) =>
-                          void patch({ estimatedMinutes: e.target.value ? Number(e.target.value) : null })
+                          edit({ estimatedMinutes: e.target.value ? Number(e.target.value) : null })
                         }
                       />
                     </Field>
@@ -527,7 +573,7 @@ export function TaskDetailPanel({
                         step={15}
                         className="h-8 text-[12px]"
                         defaultValue={task.actualMinutes ?? ""}
-                        onBlur={(e) => void patch({ actualMinutes: e.target.value ? Number(e.target.value) : null })}
+                        onBlur={(e) => edit({ actualMinutes: e.target.value ? Number(e.target.value) : null })}
                       />
                     </Field>
                   </div>
@@ -535,7 +581,7 @@ export function TaskDetailPanel({
                   <Field label="Visibility">
                     <NativeSelect
                       value={task.visibility}
-                      onChange={(e) => void patch({ visibility: e.target.value })}
+                      onChange={(e) => edit({ visibility: e.target.value })}
                       className="h-8 text-[12px]"
                     >
                       {VISIBILITIES.map((value) => (
@@ -559,7 +605,7 @@ export function TaskDetailPanel({
                               type="button"
                               aria-pressed={active}
                               onClick={() =>
-                                void patch({
+                                edit({
                                   tagIds: active
                                     ? task.tagIds.filter((id) => id !== tag.id)
                                     : [...task.tagIds, tag.id],
@@ -711,12 +757,12 @@ function ContentSection({
   onPatch,
 }: {
   task: TaskDetail;
-  onPatch: (body: Record<string, unknown>) => Promise<void>;
+  onPatch: (body: Record<string, unknown>) => void;
 }) {
   const content = task.content;
   if (!content) return null;
   const update = (patch: Record<string, unknown>): void => {
-    void onPatch({ isContent: true, content: { ...content, ...patch } });
+    onPatch({ isContent: true, content: { ...content, ...patch } });
   };
 
   return (
@@ -798,7 +844,7 @@ function DevSection({
   onPatch,
 }: {
   task: TaskDetail;
-  onPatch: (body: Record<string, unknown>) => Promise<void>;
+  onPatch: (body: Record<string, unknown>) => void;
 }) {
   const [open, setOpen] = React.useState(
     Boolean(task.dev?.githubUrl || task.dev?.branchName || task.dev?.pullRequestUrl || task.dev?.technicalNotes),
@@ -811,7 +857,7 @@ function DevSection({
     technicalNotes: null,
   };
   const update = (patch: Record<string, unknown>): void => {
-    void onPatch({ dev: { ...dev, ...patch } });
+    onPatch({ dev: { ...dev, ...patch } });
   };
 
   if (!open) {

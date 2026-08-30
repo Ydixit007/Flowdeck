@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Check, ChevronsUpDown, Plus, Layers } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Layers, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/client/store";
 import { NAV_ITEMS } from "@/components/layout/nav-config";
@@ -18,11 +18,15 @@ import {
 } from "@/components/ui/dropdown";
 import { ProjectIcon } from "@/components/layout/project-icon";
 import { CreateWorkspaceDialog } from "@/components/layout/create-workspace-dialog";
+import { DeleteWorkspaceDialog } from "@/components/layout/delete-workspace-dialog";
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { workspaces, workspace, workspaceId, setWorkspaceId, projects } = useApp();
   const [creatingWorkspace, setCreatingWorkspace] = React.useState(false);
+  const [deletingWorkspace, setDeletingWorkspace] = React.useState(false);
+
+  const canDeleteWorkspace = workspace?.role === "OWNER" && workspaces.length > 1;
 
   const activeProjects = projects.filter((p) => p.status !== "ARCHIVED");
 
@@ -70,6 +74,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <Plus />
               New workspace
             </DropdownMenuItem>
+            {canDeleteWorkspace ? (
+              <DropdownMenuItem destructive onSelect={() => setDeletingWorkspace(true)}>
+                <Trash2 />
+                Delete workspace
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -147,6 +157,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <CreateWorkspaceDialog open={creatingWorkspace} onOpenChange={setCreatingWorkspace} />
+      <DeleteWorkspaceDialog open={deletingWorkspace} onOpenChange={setDeletingWorkspace} />
     </aside>
   );
 }

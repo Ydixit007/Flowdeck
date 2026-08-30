@@ -42,7 +42,20 @@ export async function POST(request: NextRequest) {
       ownerId: user._id,
     });
     await WorkspaceMember.create({ workspaceId: workspace._id, userId: user._id, role: "OWNER" });
-    return ok({ workspace: workspace.toObject() }, 201);
+    // Same shape as GET, so the client can use it without a second fetch.
+    return ok(
+      {
+        workspace: {
+          id: workspace._id.toString(),
+          name: workspace.name,
+          slug: workspace.slug,
+          color: workspace.color,
+          ownerId: workspace.ownerId.toString(),
+          role: "OWNER" as const,
+        },
+      },
+      201,
+    );
   } catch (error) {
     return handleError(error);
   }

@@ -2,18 +2,15 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { fail, handleError, ok, parseBody } from "@/lib/api";
+import { fail, handleError, ok, parseBody, requireIdParam, type RouteContext } from "@/lib/api";
 import { objectId } from "@/lib/validation";
 import { isWorkspaceAdmin, requireMembership } from "@/server/authz";
 import { Workspace, WorkspaceMember } from "@/models/Workspace";
 import { Task } from "@/models/Task";
+import { Notification } from "@/models/Social";
 import { fetchUserRefs } from "@/server/users";
 import { logActivity } from "@/server/activity";
 import { WORKSPACE_ROLES } from "@/lib/types";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
@@ -63,8 +60,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const user = await requireUser();
     const { id } = await context.params;
     const membership = await requireMembership(user, id);
-    const userId = new URL(request.url).searchParams.get("userId");
-    if (!userId) return fail("userId is required", "VALIDATION_ERROR", 422);
+    const userId = requireIdParam(request, "userId");
 
     const removingSelf = user._id.toString() === userId;
     if (!removingSelf && !isWorkspaceAdmin(membership.role)) {
@@ -78,11 +74,15 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     }
 
     await WorkspaceMember.deleteOne({ workspaceId: membership.workspaceId, userId });
-    // Unassign rather than delete their work.
-    await Task.updateMany(
-      { workspaceId: membership.workspaceId, assigneeId: userId },
-      { $set: { assigneeId: null } },
-    );
+    await Promise.all([
+      // Unassign rather than delete their work.
+      Task.updateMany(
+        { workspaceId: membership.workspaceId, assigneeId: userId },
+        { $set: { assigneeId: null } },
+      ),
+      // They can no longer open anything this workspace linked to.
+      Notification.deleteMany({ workspaceId: membership.workspaceId, userId }),
+    ]);
     await logActivity({
       workspaceId: membership.workspaceId,
       actorId: user._id,

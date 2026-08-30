@@ -2,8 +2,7 @@ import type { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { handleError, ok, parseBody, parseQuery } from "@/lib/api";
-import { presenceSchema } from "@/lib/validation";
-import { objectId } from "@/lib/validation";
+import { presenceSchema, workspaceQuerySchema } from "@/lib/validation";
 import { z } from "zod";
 import { requireMembership, taskVisibilityFilter } from "@/server/authz";
 import { User } from "@/models/User";
@@ -34,7 +33,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireUser();
-    const { workspaceId } = parseQuery(request, z.object({ workspaceId: objectId }));
+    const { workspaceId } = parseQuery(request, workspaceQuerySchema);
     const membership = await requireMembership(user, workspaceId);
     await connectDB();
 

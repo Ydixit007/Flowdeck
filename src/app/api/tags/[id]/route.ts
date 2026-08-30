@@ -2,14 +2,10 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { fail, handleError, ok, parseBody } from "@/lib/api";
+import { fail, handleError, ok, parseBody, type RouteContext } from "@/lib/api";
 import { requireMembership } from "@/server/authz";
 import { Tag } from "@/models/Tag";
 import { Task } from "@/models/Task";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 const patchSchema = z.object({
   name: z.string().trim().toLowerCase().min(1).max(32).regex(/^[a-z0-9-_]+$/).optional(),

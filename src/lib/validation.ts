@@ -12,6 +12,9 @@ import {
 } from "@/lib/types";
 
 export const objectId = z.string().regex(/^[a-f\d]{24}$/i, "Invalid id");
+
+/** Query shape for every endpoint scoped to a single workspace. */
+export const workspaceQuerySchema = z.object({ workspaceId: objectId });
 const optionalId = objectId.nullish();
 
 const isoDate = z
@@ -58,15 +61,11 @@ export const updateProfileSchema = z.object({
   username: z.string().trim().toLowerCase().min(3).max(32).regex(/^[a-z0-9_.-]+$/).optional(),
   bio: z.string().max(400).nullish(),
   timezone: z.string().max(64).optional(),
-  avatar: z.string().max(2_000_000).nullish(),
 });
 
 export const notificationPrefsSchema = z.object({
   channels: z.object({ push: z.boolean(), inApp: z.boolean() }).partial().optional(),
   kinds: z.record(z.string(), z.boolean()).optional(),
-  taskStartingLeadMinutes: z.number().int().min(0).max(1440).optional(),
-  dailyAgendaHour: z.number().int().min(0).max(23).optional(),
-  weeklyPlanningWeekday: z.number().int().min(0).max(6).optional(),
   quietHours: z
     .object({
       enabled: z.boolean(),
@@ -120,7 +119,6 @@ export const createTaskSchema = z.object({
   estimatedMinutes: z.number().int().min(0).max(60 * 24 * 30).nullish(),
   actualMinutes: z.number().int().min(0).max(60 * 24 * 30).nullish(),
   recurrence: recurrenceSchema.nullish(),
-  reminders: z.array(z.object({ minutesBefore: z.number().int().min(0).max(60 * 24 * 14) })).max(5).default([]),
   subtasks: z.array(z.object({ title: z.string().trim().min(1).max(200), done: z.boolean().default(false) })).max(100).default([]),
   dependsOnIds: z.array(objectId).max(20).default([]),
   visibility: z.enum(VISIBILITIES).default("WORKSPACE"),
@@ -210,11 +208,6 @@ export const inviteSchema = z.object({
 export const pushSubscribeSchema = z.object({
   endpoint: z.string().url(),
   keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }),
-});
-
-export const parseTextSchema = z.object({
-  text: z.string().trim().min(1).max(500),
-  timezone: z.string().max(64).optional(),
 });
 
 export const searchSchema = z.object({

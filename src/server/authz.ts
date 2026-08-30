@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { ForbiddenError, NotFoundError, type AuthUser } from "@/lib/auth";
@@ -17,17 +18,26 @@ export interface Membership {
   role: WorkspaceRole;
 }
 
+/** One membership lookup per (user, workspace) per request; several handlers
+ *  ask for the same pair, and each ask was a separate round trip. */
+const lookupMembership = cache(async function lookupMembership(
+  userId: string,
+  workspaceId: string,
+): Promise<{ role: WorkspaceRole } | null> {
+  await connectDB();
+  return WorkspaceMember.findOne({ workspaceId: new Types.ObjectId(workspaceId), userId: new Types.ObjectId(userId) })
+    .select("role")
+    .lean<{ role: WorkspaceRole } | null>();
+});
+
 /** Throws unless the user belongs to the workspace with at least `minRole`. */
 export async function requireMembership(
   user: AuthUser,
   workspaceId: string | Types.ObjectId,
   minRole: WorkspaceRole = "VIEWER",
 ): Promise<Membership> {
-  await connectDB();
   const wsId = oid(workspaceId);
-  const member = await WorkspaceMember.findOne({ workspaceId: wsId, userId: user._id })
-    .select("role")
-    .lean<{ role: WorkspaceRole } | null>();
+  const member = await lookupMembership(user._id.toString(), wsId.toString());
   if (!member) throw new ForbiddenError("You do not have access to this workspace");
   if ((RANK[member.role] ?? -1) < (RANK[minRole] ?? 0)) {
     throw new ForbiddenError("Insufficient workspace role");
@@ -62,17 +72,19 @@ export async function requireProject(
   return { project, membership };
 }
 
-/**
- * Mongo filter that limits tasks to what this user is allowed to see:
- * private tasks only when they created them or are the assignee.
- */
+/** Tasks this user may see: private ones only when they created them or are the
+ *  assignee. Nested under $and so a caller spreading another $or cannot clobber it. */
 export function taskVisibilityFilter(user: AuthUser, workspaceIds: Types.ObjectId[]) {
   return {
     workspaceId: { $in: workspaceIds },
-    $or: [
-      { visibility: { $ne: "PRIVATE" as const } },
-      { creatorId: user._id },
-      { assigneeId: user._id },
+    $and: [
+      {
+        $or: [
+          { visibility: { $ne: "PRIVATE" as const } },
+          { creatorId: user._id },
+          { assigneeId: user._id },
+        ],
+      },
     ],
   };
 }

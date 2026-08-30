@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { handleError, ok, parseBody } from "@/lib/api";
+import { handleError, ok, parseBody, type RouteContext } from "@/lib/api";
 import { createCommentSchema } from "@/lib/validation";
 import { requireTaskAccess } from "@/server/authz";
 import { Comment } from "@/models/Social";
@@ -10,10 +10,6 @@ import { WorkspaceMember } from "@/models/Workspace";
 import { logActivity } from "@/server/activity";
 import { notifyMentions } from "@/server/notifications";
 import { fetchUserRefs } from "@/server/users";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 const MENTION_PATTERN = /@([a-z0-9_.-]{3,32})/gi;
 

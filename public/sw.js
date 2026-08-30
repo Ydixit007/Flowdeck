@@ -1,5 +1,5 @@
 /* Flowdeck service worker: offline shell + cached API reads + web push. */
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `flowdeck-shell-${VERSION}`;
 const DATA_CACHE = `flowdeck-data-${VERSION}`;
 const OFFLINE_URL = "/offline";
@@ -63,8 +63,11 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
+    // Do not cache navigations: auth gating lives in middleware, and a redirected
+    // response cannot be returned from respondWith (browser throws, then retries,
+    // which loops). Network only, offline shell as the fallback.
     event.respondWith(
-      networkFirst(request, SHELL_CACHE).catch(async () => {
+      fetch(request).catch(async () => {
         const cache = await caches.open(SHELL_CACHE);
         return (await cache.match(OFFLINE_URL)) ?? Response.error();
       }),

@@ -4,9 +4,6 @@ import { NOTIFICATION_KINDS, type NotificationKind } from "@/lib/types";
 export interface NotificationPrefs {
   channels: { push: boolean; inApp: boolean };
   kinds: Record<NotificationKind, boolean>;
-  taskStartingLeadMinutes: number;
-  dailyAgendaHour: number;
-  weeklyPlanningWeekday: number; // 0 = Sunday
   quietHours: { enabled: boolean; startHour: number; endHour: number };
 }
 
@@ -32,9 +29,6 @@ export interface UserDoc {
 export const defaultNotificationPrefs = (): NotificationPrefs => ({
   channels: { push: true, inApp: true },
   kinds: Object.fromEntries(NOTIFICATION_KINDS.map((k) => [k, true])) as Record<NotificationKind, boolean>,
-  taskStartingLeadMinutes: 10,
-  dailyAgendaHour: 8,
-  weeklyPlanningWeekday: 0,
   quietHours: { enabled: false, startHour: 22, endHour: 7 },
 });
 

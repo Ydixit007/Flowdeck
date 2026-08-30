@@ -63,8 +63,6 @@ export const NOTIFICATION_KINDS = [
   "MENTION",
   "COMMENT",
   "DEADLINE",
-  "DAILY_AGENDA",
-  "WEEKLY_PLANNING",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 

@@ -64,6 +64,8 @@ const activitySchema = new Schema<ActivityDoc>(
 activitySchema.index({ workspaceId: 1, createdAt: -1 });
 activitySchema.index({ projectId: 1, createdAt: -1 });
 activitySchema.index({ taskId: 1, createdAt: 1 });
+// Backs the edit-coalescing lookup in logActivity().
+activitySchema.index({ taskId: 1, actorId: 1, kind: 1, createdAt: -1 });
 
 export const Activity: Model<ActivityDoc> =
   (models.Activity as Model<ActivityDoc>) ?? model<ActivityDoc>("Activity", activitySchema);
@@ -97,6 +99,8 @@ const notificationSchema = new Schema<NotificationDoc>(
 );
 
 notificationSchema.index({ userId: 1, readAt: 1, createdAt: -1 });
+// Backs the dedupe lookup in notify().
+notificationSchema.index({ userId: 1, kind: 1, taskId: 1, createdAt: -1 });
 
 export const Notification: Model<NotificationDoc> =
   (models.Notification as Model<NotificationDoc>) ??

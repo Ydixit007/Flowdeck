@@ -2,15 +2,11 @@ import type { NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { fail, handleError, ok, parseBody } from "@/lib/api";
+import { fail, handleError, ok, parseBody, type RouteContext } from "@/lib/api";
 import { inviteSchema } from "@/lib/validation";
 import { isWorkspaceAdmin, requireMembership } from "@/server/authz";
 import { Invite, WorkspaceMember } from "@/models/Workspace";
 import { User } from "@/models/User";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {

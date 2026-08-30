@@ -1,16 +1,12 @@
 import type { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { fail, handleError, ok, parseBody } from "@/lib/api";
+import { fail, handleError, ok, parseBody, type RouteContext } from "@/lib/api";
 import { updateProjectSchema } from "@/lib/validation";
 import { isWorkspaceAdmin, requireProject } from "@/server/authz";
 import { Project } from "@/models/Project";
 import { Task } from "@/models/Task";
 import { logActivity } from "@/server/activity";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {

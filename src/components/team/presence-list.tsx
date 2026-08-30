@@ -31,6 +31,8 @@ export function PresenceList({ compact = false }: { compact?: boolean }) {
     if (!workspaceId) return;
     let cancelled = false;
     const load = (): void => {
+      // A hidden tab does not need presence; it refreshes when it comes back.
+      if (document.visibilityState !== "visible") return;
       void api
         .get<{ presence: PresenceRow[] }>(`/api/presence${qs({ workspaceId })}`)
         .then((data) => {
@@ -43,9 +45,11 @@ export function PresenceList({ compact = false }: { compact?: boolean }) {
     };
     load();
     const timer = window.setInterval(load, POLL_MS);
+    document.addEventListener("visibilitychange", load);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", load);
     };
   }, [workspaceId]);
 

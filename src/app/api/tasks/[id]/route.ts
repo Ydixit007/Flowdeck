@@ -2,18 +2,15 @@ import type { NextRequest } from "next/server";
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { fail, handleError, ok, parseBody } from "@/lib/api";
+import { fail, handleError, ok, parseBody, type RouteContext } from "@/lib/api";
 import { updateTaskSchema } from "@/lib/validation";
 import { requireTaskAccess } from "@/server/authz";
 import { Task, TaskOccurrence, type TaskDoc } from "@/models/Task";
 import { Comment } from "@/models/Social";
 import { logActivity } from "@/server/activity";
+import { sameValue } from "@/lib/diff";
 import { WorkspaceMember } from "@/models/Workspace";
 import { Project } from "@/models/Project";
-
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
@@ -153,28 +150,37 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const updated = await Task.findByIdAndUpdate(task._id, { $set: update }, { new: true }).lean<TaskDoc | null>();
     if (!updated) return fail("Task not found", "NOT_FOUND", 404);
 
-    const scheduleChanged = SCHEDULE_FIELDS.some((f) => input[f] !== undefined);
+    // Only log fields whose value actually moved. Sending the current value
+    // back (a re-save, a drag that lands where it started) is not history.
+    const scheduleChanged = SCHEDULE_FIELDS.some(
+      (f) => input[f] !== undefined && !sameValue(input[f], task[f]),
+    );
     const statusChanged = input.status !== undefined && input.status !== task.status;
-    await logActivity({
-      workspaceId: task.workspaceId,
-      actorId: user._id,
-      kind: statusChanged
-        ? input.status === "DONE"
-          ? "TASK_COMPLETED"
-          : "TASK_STATUS_CHANGED"
-        : scheduleChanged
-          ? "TASK_SCHEDULED"
-          : "TASK_UPDATED",
-      taskId: task._id,
-      projectId: updated.projectId ?? null,
-      summary: statusChanged
-        ? input.status === "DONE"
-          ? `completed ${updated.title}`
-          : `moved ${updated.title} to ${String(input.status).toLowerCase().replace("_", " ")}`
-        : scheduleChanged
-          ? `rescheduled ${updated.title}`
-          : `updated ${updated.title}`,
-    });
+    const anyChanged = Object.keys(update).some(
+      (key) => !sameValue(update[key], (task as unknown as Record<string, unknown>)[key]),
+    );
+    if (anyChanged) {
+      await logActivity({
+        workspaceId: task.workspaceId,
+        actorId: user._id,
+        kind: statusChanged
+          ? input.status === "DONE"
+            ? "TASK_COMPLETED"
+            : "TASK_STATUS_CHANGED"
+          : scheduleChanged
+            ? "TASK_SCHEDULED"
+            : "TASK_UPDATED",
+        taskId: task._id,
+        projectId: updated.projectId ?? null,
+        summary: statusChanged
+          ? input.status === "DONE"
+            ? `completed ${updated.title}`
+            : `moved ${updated.title} to ${String(input.status).toLowerCase().replace("_", " ")}`
+          : scheduleChanged
+            ? `rescheduled ${updated.title}`
+            : `updated ${updated.title}`,
+      });
+    }
 
     if (input.assigneeId && !task.assigneeId?.equals(input.assigneeId) && !user._id.equals(input.assigneeId)) {
       const { notifyAssignment } = await import("@/server/notifications");

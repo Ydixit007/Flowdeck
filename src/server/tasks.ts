@@ -141,7 +141,7 @@ export function buildCalendarItems(
  *  it, or a recurring series that started before the window ends. */
 export function windowQuery(window: { from: Date; to: Date }) {
   return {
-    $or: [
+    $and: [{ $or: [
       { startAt: { $gte: window.from, $lte: window.to } },
       { dueAt: { $gte: window.from, $lte: window.to } },
       // Long tasks spanning the window.
@@ -149,7 +149,7 @@ export function windowQuery(window: { from: Date; to: Date }) {
       // Recurring series anchored before the window end.
       { recurrence: { $ne: null }, startAt: { $lte: window.to } },
       { recurrence: { $ne: null }, startAt: null, dueAt: { $lte: window.to } },
-    ],
+    ] }],
   };
 }
 

@@ -37,14 +37,6 @@ export interface Subtask {
   completedAt?: Date | null;
 }
 
-export interface Reminder {
-  _id: Types.ObjectId;
-  /** Minutes before startAt (or dueAt when there is no start). */
-  minutesBefore: number;
-  /** Last occurrence date this reminder was delivered for; prevents duplicates. */
-  lastSentForOccurrence?: Date | null;
-}
-
 export interface DevMeta {
   githubUrl?: string | null;
   pullRequestUrl?: string | null;
@@ -84,7 +76,6 @@ export interface TaskDoc {
   recurrence?: RecurrenceRule | null;
   /** Set on the master task so occurrence math is timezone-stable. */
   scheduleTimezone?: string | null;
-  reminders: Reminder[];
   subtasks: Subtask[];
   dependsOnIds: Types.ObjectId[];
   attachmentIds: Types.ObjectId[];
@@ -117,14 +108,6 @@ const subtaskSchema = new Schema<Subtask>(
     done: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
     completedAt: { type: Date, default: null },
-  },
-  { _id: true },
-);
-
-const reminderSchema = new Schema<Reminder>(
-  {
-    minutesBefore: { type: Number, required: true, min: 0, max: 60 * 24 * 14 },
-    lastSentForOccurrence: { type: Date, default: null },
   },
   { _id: true },
 );
@@ -171,7 +154,6 @@ const taskSchema = new Schema<TaskDoc>(
     actualMinutes: { type: Number, default: null, min: 0 },
     recurrence: { type: recurrenceSchema, default: null },
     scheduleTimezone: { type: String, default: null },
-    reminders: { type: [reminderSchema], default: [] },
     subtasks: { type: [subtaskSchema], default: [] },
     dependsOnIds: { type: [Schema.Types.ObjectId], ref: "Task", default: [] },
     attachmentIds: { type: [Schema.Types.ObjectId], ref: "Attachment", default: [] },
@@ -190,6 +172,8 @@ taskSchema.index({ workspaceId: 1, dueAt: 1 });
 taskSchema.index({ workspaceId: 1, status: 1 });
 taskSchema.index({ workspaceId: 1, projectId: 1, status: 1 });
 taskSchema.index({ assigneeId: 1, startAt: 1 });
+// Backs the per-user reminder sweep.
+taskSchema.index({ assigneeId: 1, status: 1, dueAt: 1 });
 taskSchema.index({ creatorId: 1, visibility: 1 });
 taskSchema.index({ workspaceId: 1, isContent: 1, "content.publishAt": 1 });
 taskSchema.index({ workspaceId: 1, recurrence: 1 });

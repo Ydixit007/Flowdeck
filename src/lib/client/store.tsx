@@ -59,7 +59,12 @@ interface AppState {
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
   refreshMembers: () => Promise<void>;
+  refreshWorkspaces: () => Promise<void>;
   setUnreadCount: (count: number) => void;
+  /** Bumped whenever tasks change outside a screen's own list, so every
+   *  useTasks() refetches. Screens cannot reach each other's local state. */
+  taskVersion: number;
+  invalidateTasks: () => void;
 }
 
 const AppContext = React.createContext<AppState | null>(null);
@@ -79,19 +84,21 @@ export function AppProvider({
 }) {
   const [user, setUser] = React.useState(initialUser);
   const [workspaces, setWorkspaces] = React.useState(initialWorkspaces);
-  const [workspaceId, setWorkspaceIdState] = React.useState(initialWorkspaceId);
+  // Restore the last active workspace on first render, but only if the user
+  // still belongs to it. Lazy init avoids a second render and a flash of the
+  // server-chosen workspace.
+  const [workspaceId, setWorkspaceIdState] = React.useState(() => {
+    if (typeof window === "undefined") return initialWorkspaceId;
+    const stored = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    return stored && initialWorkspaces.some((w) => w.id === stored) ? stored : initialWorkspaceId;
+  });
   const [projects, setProjects] = React.useState<ProjectRef[]>([]);
   const [tags, setTags] = React.useState<TagRef[]>([]);
   const [members, setMembers] = React.useState<MemberRef[]>([]);
   const [unreadCount, setUnreadCount] = React.useState(0);
+  const [taskVersion, setTaskVersion] = React.useState(0);
 
-  // Restore the last active workspace, but only if the user still belongs to it.
-  React.useEffect(() => {
-    const stored = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
-    if (stored && stored !== workspaceId && initialWorkspaces.some((w) => w.id === stored)) {
-      setWorkspaceIdState(stored);
-    }
-  }, [initialWorkspaces, workspaceId]);
+  const invalidateTasks = React.useCallback(() => setTaskVersion((v) => v + 1), []);
 
   const setWorkspaceId = React.useCallback((id: string) => {
     setWorkspaceIdState(id);
@@ -153,17 +160,21 @@ export function AppProvider({
     };
   }, [workspaceId]);
 
-  // Refresh the workspace list when membership may have changed elsewhere.
+  const refreshWorkspaces = React.useCallback(async () => {
+    try {
+      const data = await api.get<{ workspaces: WorkspaceRef[] }>("/api/workspaces");
+      setWorkspaces(data.workspaces);
+    } catch {
+      // Offline or signed out: keep the list we have.
+    }
+  }, []);
+
+  // Membership can also change in another tab or by someone else.
   React.useEffect(() => {
-    const onFocus = (): void => {
-      void api
-        .get<{ workspaces: WorkspaceRef[] }>("/api/workspaces")
-        .then((data) => setWorkspaces(data.workspaces))
-        .catch(() => undefined);
-    };
+    const onFocus = (): void => void refreshWorkspaces();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, []);
+  }, [refreshWorkspaces]);
 
   const value = React.useMemo<AppState>(
     () => ({
@@ -180,7 +191,10 @@ export function AppProvider({
       refreshProjects,
       refreshTags,
       refreshMembers,
+      refreshWorkspaces,
       setUnreadCount,
+      taskVersion,
+      invalidateTasks,
     }),
     [
       user,
@@ -194,6 +208,9 @@ export function AppProvider({
       refreshProjects,
       refreshTags,
       refreshMembers,
+      refreshWorkspaces,
+      taskVersion,
+      invalidateTasks,
     ],
   );
 
@@ -238,7 +255,7 @@ export interface UseTasksResult {
 }
 
 export function useTasks(query: TaskQuery, deps: unknown[] = []): UseTasksResult {
-  const { workspaceId } = useApp();
+  const { workspaceId, taskVersion } = useApp();
   const [items, setItems] = React.useState<CalendarItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -282,7 +299,8 @@ export function useTasks(query: TaskQuery, deps: unknown[] = []): UseTasksResult
 
   React.useEffect(() => {
     void reload();
-  }, [reload]);
+    // taskVersion refetches when another screen created or changed a task.
+  }, [reload, taskVersion]);
 
   const mutateItem = React.useCallback<UseTasksResult["mutateItem"]>(
     async (id, patch, persist) => {

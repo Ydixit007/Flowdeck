@@ -17,7 +17,7 @@ import { Tag } from "../src/models/Tag";
 import { Task, TaskOccurrence } from "../src/models/Task";
 import { Comment, Activity, Notification, PushSubscription, Attachment } from "../src/models/Social";
 
-export async function syncAllIndexes(): Promise<void> {
+async function syncAllIndexes(): Promise<void> {
   const models = [
     User, Workspace, WorkspaceMember, Invite, Project, Tag,
     Task, TaskOccurrence, Comment, Activity, Notification, PushSubscription, Attachment,
@@ -38,11 +38,8 @@ async function main(): Promise<void> {
   await mongoose.disconnect();
 }
 
-// Only self-run when invoked directly, not when seed.ts imports syncAllIndexes.
-if (process.argv[1]?.endsWith("indexes.ts")) {
-  main().catch((error: unknown) => {
-    console.error(error);
-    process.exitCode = 1;
-    void mongoose.disconnect();
-  });
-}
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exitCode = 1;
+  void mongoose.disconnect();
+});

@@ -51,3 +51,18 @@ export function parseQuery<T>(request: Request, schema: ZodType<T>): T {
   }
   return schema.parse(entries);
 }
+
+/** Next passes dynamic segments as a promise; every `[id]` route shares this. */
+export interface RouteContext {
+  params: Promise<{ id: string }>;
+}
+
+/** Reads a required ObjectId query param, rejecting anything Mongo would
+ *  choke on with a 422 rather than a cast error. */
+export function requireIdParam(request: Request, name: string): string {
+  const value = new URL(request.url).searchParams.get(name);
+  if (!value || !/^[a-f\d]{24}$/i.test(value)) {
+    throw new ZodError([{ code: "custom", path: [name], message: `${name} is required` }]);
+  }
+  return value;
+}

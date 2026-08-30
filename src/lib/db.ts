@@ -25,7 +25,7 @@ export async function connectDB(): Promise<typeof mongoose> {
       // Skip the extra round trips a fresh topology scan costs on cold start.
       maxIdleTimeMS: 60_000,
       compressors: ["zstd"],
-      // Indexes are managed by `npm run seed`, not rebuilt on every cold start.
+      // Indexes are managed by `npm run indexes`, not rebuilt on every cold start.
       autoIndex: false,
       dbName: "FlowDeck",
     });

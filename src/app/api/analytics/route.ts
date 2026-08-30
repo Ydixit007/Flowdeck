@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { handleError, ok, parseQuery } from "@/lib/api";
 import { objectId } from "@/lib/validation";
 import { requireMembership, taskVisibilityFilter } from "@/server/authz";
+import { andFilters } from "@/lib/filters";
 import { Task, TaskOccurrence, type TaskDoc } from "@/models/Task";
 import { Project } from "@/models/Project";
 import { buildCalendarItems } from "@/server/tasks";
@@ -47,7 +48,25 @@ export async function GET(request: NextRequest) {
     const to = addDaysInTz(startOfDayInTz(now, tz), 1, tz);
 
     const visible = taskVisibilityFilter(user, [workspaceId]);
-    const tasks = await Task.find(visible).lean<TaskDoc[]>();
+    // Only tasks that can land in the window: scheduled, completed or created
+    // inside it, or a recurring series anchored before it ends.
+    const tasks = await Task.find(
+      andFilters(visible, {
+        $and: [
+          {
+            $or: [
+              { startAt: { $gte: from, $lte: to } },
+              { dueAt: { $gte: from, $lte: to } },
+              { completedAt: { $gte: from, $lte: to } },
+              { createdAt: { $gte: from, $lte: to } },
+              { recurrence: { $ne: null }, startAt: { $lte: to } },
+            ],
+          },
+        ],
+      }),
+    )
+      .limit(5000)
+      .lean<TaskDoc[]>();
     const overrides = await TaskOccurrence.find({
       workspaceId,
       occurrenceStart: { $gte: from, $lte: to },
