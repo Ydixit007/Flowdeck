@@ -7,12 +7,13 @@ import { cn, initials } from "@/lib/utils";
 export interface AvatarProps {
   name: string;
   src?: string | null;
-  size?: "xs" | "sm" | "md" | "lg" | "xl";
+  size?: "xxs" | "xs" | "sm" | "md" | "lg" | "xl";
   online?: boolean;
   className?: string;
 }
 
 const SIZES: Record<NonNullable<AvatarProps["size"]>, string> = {
+  xxs: "size-4 text-[8px]",
   xs: "size-5 text-[9px]",
   sm: "size-6 text-[10px]",
   md: "size-8 text-[11px]",

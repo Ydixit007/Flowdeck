@@ -6,6 +6,7 @@ import { GripHorizontal, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/client/store";
 import type { CalendarItem } from "@/server/tasks";
+import { Avatar } from "@/components/ui/avatar";
 import { PLATFORM_META, PriorityIcon, StatusIcon, priorityRailClass } from "@/components/tasks/task-meta";
 
 interface TaskBlockProps {
@@ -16,6 +17,60 @@ interface TaskBlockProps {
   onToggleStatus: () => void;
   onPointerDownDrag?: (event: React.PointerEvent) => void;
   onPointerDownResize?: (event: React.PointerEvent) => void;
+  hideProject?: boolean;
+}
+
+export function formatTimeRange(
+  item: {
+    startAt?: string | null;
+    dueAt?: string | null;
+    allDay?: boolean;
+    estimatedMinutes?: number | null;
+  },
+  timeZone: string,
+): { timeLabel: string | null; fullTimeLabel: string | null } {
+  if (item.allDay) {
+    if (!item.startAt) return { timeLabel: "All day", fullTimeLabel: "All day" };
+    const startDate = formatInTimeZone(new Date(item.startAt), timeZone, "d MMM");
+    if (!item.dueAt) return { timeLabel: "All day", fullTimeLabel: "All day" };
+    const endDate = formatInTimeZone(new Date(item.dueAt), timeZone, "d MMM");
+    const label = startDate === endDate ? "All day" : `All day (${startDate} – ${endDate})`;
+    return { timeLabel: label, fullTimeLabel: label };
+  }
+
+  if (!item.startAt) {
+    if (item.dueAt) {
+      const due = formatInTimeZone(new Date(item.dueAt), timeZone, "HH:mm");
+      return { timeLabel: `Ends ${due}`, fullTimeLabel: `Ends at ${due}` };
+    }
+    return { timeLabel: null, fullTimeLabel: null };
+  }
+
+  const start = new Date(item.startAt);
+  const startTime = formatInTimeZone(start, timeZone, "HH:mm");
+
+  const end = item.dueAt
+    ? new Date(item.dueAt)
+    : item.estimatedMinutes && item.estimatedMinutes > 0
+      ? new Date(start.getTime() + item.estimatedMinutes * 60_000)
+      : new Date(start.getTime() + 30 * 60_000);
+
+  if (end.getTime() <= start.getTime()) {
+    return { timeLabel: startTime, fullTimeLabel: `at ${startTime}` };
+  }
+
+  const sameDay =
+    formatInTimeZone(start, timeZone, "yyyy-MM-dd") === formatInTimeZone(end, timeZone, "yyyy-MM-dd");
+  const endTime = sameDay
+    ? formatInTimeZone(end, timeZone, "HH:mm")
+    : formatInTimeZone(end, timeZone, "d MMM HH:mm");
+
+  const timeLabel = `${startTime} – ${endTime}`;
+  const fullTimeLabel = sameDay
+    ? `${startTime} to ${endTime}`
+    : `${startTime} to ${formatInTimeZone(end, timeZone, "MMMM d, HH:mm")}`;
+
+  return { timeLabel, fullTimeLabel };
 }
 
 export function TaskBlock({
@@ -26,8 +81,9 @@ export function TaskBlock({
   onToggleStatus,
   onPointerDownDrag,
   onPointerDownResize,
+  hideProject = false,
 }: TaskBlockProps) {
-  const { projects } = useApp();
+  const { projects, members, user } = useApp();
   const project = item.projectId ? projects.find((p) => p.id === item.projectId) : undefined;
   const accent = item.isContent
     ? PLATFORM_META[item.content?.platform ?? "OTHER"].color
@@ -35,13 +91,31 @@ export function TaskBlock({
   const done = item.status === "DONE";
   const cancelled = item.status === "CANCELLED";
 
-  const timeLabel = item.startAt && !item.allDay ? formatInTimeZone(new Date(item.startAt), timeZone, "HH:mm") : null;
+  const assignee = React.useMemo(() => {
+    if (!item.assigneeId) return null;
+    if (user && item.assigneeId === user.id) return user;
+    return members.find((m) => m.id === item.assigneeId) ?? { name: "Assigned", avatar: null };
+  }, [item.assigneeId, members, user]);
+
+  const { timeLabel, fullTimeLabel } = React.useMemo(
+    () => formatTimeRange(item, timeZone),
+    [item.startAt, item.dueAt, item.allDay, item.estimatedMinutes, timeZone],
+  );
+
+  const multiDayLabel = React.useMemo(() => {
+    if (!item.allDay || !item.startAt || !item.dueAt) return null;
+    const startDay = formatInTimeZone(new Date(item.startAt), timeZone, "d MMM");
+    const endDay = formatInTimeZone(new Date(item.dueAt), timeZone, "d MMM");
+    return startDay === endDay ? null : `${startDay} – ${endDay}`;
+  }, [item.allDay, item.startAt, item.dueAt, timeZone]);
 
   if (variant === "chip") {
     return (
       <button
         type="button"
         onClick={onClick}
+        title={`${item.title}${timeLabel ? ` (${timeLabel})` : ""}${assignee ? ` · ${assignee.name}` : ""}`}
+        aria-label={`${item.title}${fullTimeLabel ? ` (${fullTimeLabel})` : ""}${assignee ? ` assigned to ${assignee.name}` : ""}`}
         className={cn(
           "flex w-full items-center gap-1.5 truncate rounded-[5px] border-l-2 bg-surface-raised px-1.5 py-1 text-left text-[11px] font-medium transition-colors hover:bg-muted",
           done && "opacity-60",
@@ -49,7 +123,20 @@ export function TaskBlock({
         style={{ borderLeftColor: accent ?? "var(--border-strong)" }}
       >
         {item.isRecurring ? <Repeat className="size-2.5 shrink-0 text-muted-foreground" /> : null}
-        <span className={cn("truncate", done && "line-through")}>{item.title}</span>
+        <span className={cn("min-w-0 flex-1 truncate", done && "line-through")}>
+          {!item.allDay && timeLabel ? (
+            <span className="mr-1 text-[10px] tabular-nums text-muted-foreground">{timeLabel}</span>
+          ) : multiDayLabel ? (
+            <span className="mr-1 text-[10px] tabular-nums font-semibold text-muted-foreground">{multiDayLabel}</span>
+          ) : null}
+          {item.title}
+        </span>
+        {assignee ? (
+          <span className="ml-auto flex shrink-0 items-center gap-1 pl-1 text-[9.5px] text-muted-foreground">
+            <Avatar name={assignee.name} src={assignee.avatar} size="xxs" />
+            <span className="max-w-[55px] truncate font-medium leading-none">{assignee.name}</span>
+          </span>
+        ) : null}
       </button>
     );
   }
@@ -83,27 +170,35 @@ export function TaskBlock({
             <PriorityIcon priority={item.priority} />
             {item.isRecurring ? <Repeat className="size-3 shrink-0 text-muted-foreground" /> : null}
           </span>
-          <span className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-            {timeLabel ? <span className="tabular-nums">{timeLabel}</span> : null}
-            {item.allDay && item.startAt ? <span>All day</span> : null}
-            {project ? (
-              <span className="flex items-center gap-1">
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            {timeLabel ? <span className="shrink-0 tabular-nums">{timeLabel}</span> : null}
+            {!hideProject && project ? (
+              <span className="flex shrink-0 items-center gap-1">
                 <span className="size-1.5 rounded-full" style={{ background: project.color }} />
-                {project.name}
+                <span className="max-w-[120px] truncate">{project.name}</span>
               </span>
             ) : null}
             {item.subtaskTotal > 0 ? (
-              <span className="tabular-nums">
+              <span className="shrink-0 tabular-nums">
                 {item.subtaskDone}/{item.subtaskTotal}
               </span>
             ) : null}
             {item.isContent && item.content ? (
-              <span style={{ color: PLATFORM_META[item.content.platform].color }}>
+              <span className="shrink-0" style={{ color: PLATFORM_META[item.content.platform].color }}>
                 {PLATFORM_META[item.content.platform].label}
               </span>
             ) : null}
           </span>
         </button>
+        {assignee ? (
+          <div
+            title={`Assigned to ${assignee.name}`}
+            className="flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 py-0.5 pl-1 pr-2 text-[11px] text-muted-foreground transition-colors group-hover:bg-muted"
+          >
+            <Avatar name={assignee.name} src={assignee.avatar} size="xs" />
+            <span className="max-w-[80px] sm:max-w-[100px] truncate font-medium">{assignee.name}</span>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -125,7 +220,8 @@ export function TaskBlock({
           onClick();
         }
       }}
-      aria-label={`${item.title}${timeLabel ? ` at ${timeLabel}` : ""}`}
+      title={`${item.title}${timeLabel ? ` (${timeLabel})` : ""}${assignee ? ` · ${assignee.name}` : ""}`}
+      aria-label={`${item.title}${fullTimeLabel ? ` (${fullTimeLabel})` : ""}${assignee ? ` assigned to ${assignee.name}` : ""}`}
     >
       <span
         aria-hidden
@@ -145,6 +241,13 @@ export function TaskBlock({
       </span>
       {timeLabel ? (
         <span className="truncate text-[10px] tabular-nums text-muted-foreground">{timeLabel}</span>
+      ) : null}
+
+      {assignee ? (
+        <div className="mt-auto flex min-w-0 items-center gap-1 pt-0.5 text-[10px] text-muted-foreground">
+          <Avatar name={assignee.name} src={assignee.avatar} size="xxs" />
+          <span className="truncate font-medium leading-none">{assignee.name}</span>
+        </div>
       ) : null}
 
       {onPointerDownResize ? (

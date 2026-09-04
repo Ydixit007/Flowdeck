@@ -9,6 +9,7 @@ import { useShell } from "@/components/layout/app-shell";
 import { dayStart } from "@/components/calendar/range";
 import { CONTENT_STATUSES, type ContentStatus } from "@/lib/types";
 import type { CalendarItem } from "@/server/tasks";
+import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { EmptyState, Skeleton, Tabs, TabsList, TabsTrigger } from "@/components/ui/misc";
 import { FilterBar } from "@/components/tasks/filter-bar";
@@ -176,8 +177,14 @@ function ContentCard({
   onOpen: () => void;
   onMove: (status: ContentStatus) => void;
 }) {
+  const { members, user } = useApp();
   const platform = item.content?.platform ?? "OTHER";
   const publishAt = item.content?.publishAt ?? item.startAt;
+  const assignee = React.useMemo(() => {
+    if (!item.assigneeId) return null;
+    if (user && item.assigneeId === user.id) return user;
+    return members.find((m) => m.id === item.assigneeId) ?? { name: "Assigned", avatar: null };
+  }, [item.assigneeId, members, user]);
 
   return (
     <div className="rounded-md border border-border bg-surface p-2 transition-colors hover:border-border-strong">
@@ -193,6 +200,12 @@ function ContentCard({
         {publishAt ? (
           <span className="mt-1 block text-[11px] text-muted-foreground">
             {formatInTimeZone(new Date(publishAt), timeZone, "EEE d MMM · HH:mm")}
+          </span>
+        ) : null}
+        {assignee ? (
+          <span className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Avatar name={assignee.name} src={assignee.avatar} size="xs" />
+            <span className="truncate font-medium">{assignee.name}</span>
           </span>
         ) : null}
       </button>

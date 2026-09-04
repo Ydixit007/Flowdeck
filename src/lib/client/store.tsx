@@ -242,6 +242,7 @@ export interface TaskQuery extends TaskFilters {
   from?: Date;
   to?: Date;
   unscheduled?: boolean;
+  includeUnscheduled?: boolean;
 }
 
 export interface UseTasksResult {
@@ -278,6 +279,7 @@ export function useTasks(query: TaskQuery, deps: unknown[] = []): UseTasksResult
         contentStatus: query.contentStatus,
         isContent: query.isContent === undefined ? undefined : String(query.isContent),
         unscheduled: query.unscheduled ? "true" : undefined,
+        includeUnscheduled: query.includeUnscheduled ? "true" : undefined,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [workspaceId, depsKey],

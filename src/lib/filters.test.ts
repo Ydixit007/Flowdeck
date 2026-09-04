@@ -26,3 +26,20 @@ test("a naive spread would have lost a clause", () => {
 test("filters without $and merge as plain keys", () => {
   assert.deepEqual(andFilters({ a: 1 }, { b: 2 }), { a: 1, b: 2 });
 });
+
+test("andFilters merges visibility, assignee 'me' filter and window filters together", () => {
+  const filter = {
+    workspaceId: { $in: ["ws1"] },
+    $and: [
+      { $or: [{ visibility: "WORKSPACE" }, { creatorId: "u1" }, { assigneeId: "u1" }] },
+      { $or: [{ assigneeId: "u1" }, { creatorId: "u1", assigneeId: null }] },
+    ],
+  };
+  const window = { $and: [{ $or: [{ startAt: { $lte: "to" } }] }] };
+
+  const merged = andFilters(filter, window) as { workspaceId: { $in: string[] }; $and: unknown[] };
+  assert.equal(merged.$and.length, 3);
+  assert.deepEqual(merged.$and[0], filter.$and[0]);
+  assert.deepEqual(merged.$and[1], filter.$and[1]);
+  assert.deepEqual(merged.$and[2], window.$and[0]);
+});

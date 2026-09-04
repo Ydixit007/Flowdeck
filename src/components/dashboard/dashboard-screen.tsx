@@ -27,7 +27,7 @@ import { PRIORITY_META } from "@/components/tasks/task-meta";
 import { PresenceList } from "@/components/team/presence-list";
 
 export function DashboardScreen() {
-  const { user } = useApp();
+  const { user, members } = useApp();
   const { openQuickAdd } = useShell();
   const timeZone = user.timezone;
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -223,6 +223,9 @@ export function DashboardScreen() {
             <ul className="space-y-2">
               {upcoming.map((item) => {
                 const anchor = item.startAt ?? item.dueAt;
+                const assignee = item.assigneeId
+                  ? (user && item.assigneeId === user.id ? user : members.find((m) => m.id === item.assigneeId))
+                  : null;
                 return (
                   <li key={item.id} className="flex items-center gap-2.5">
                     <span className="w-11 shrink-0 text-[11px] font-medium uppercase text-muted-foreground">
@@ -235,6 +238,12 @@ export function DashboardScreen() {
                     >
                       {item.title}
                     </button>
+                    {assignee ? (
+                      <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+                        <Avatar name={assignee.name} src={assignee.avatar} size="xs" />
+                        <span className="max-w-[70px] truncate font-medium">{assignee.name}</span>
+                      </span>
+                    ) : null}
                     {item.priority !== "NONE" ? (
                       <span className={`shrink-0 text-[10px] font-semibold ${PRIORITY_META[item.priority].className}`}>
                         {PRIORITY_META[item.priority].label}
@@ -254,17 +263,28 @@ export function DashboardScreen() {
             <PanelEmpty icon={<Sparkles />} text="No loose ideas. Capture one when it strikes." />
           ) : (
             <ul className="space-y-1.5">
-              {inbox.items.slice(0, 6).map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(item.id)}
-                    className="w-full truncate rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-muted"
-                  >
-                    {item.title}
-                  </button>
-                </li>
-              ))}
+              {inbox.items.slice(0, 6).map((item) => {
+                const assignee = item.assigneeId
+                  ? (user && item.assigneeId === user.id ? user : members.find((m) => m.id === item.assigneeId))
+                  : null;
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(item.id)}
+                      className="flex w-full items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-muted"
+                    >
+                      <span className="truncate">{item.title}</span>
+                      {assignee ? (
+                        <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+                          <Avatar name={assignee.name} src={assignee.avatar} size="xs" />
+                          <span className="max-w-[70px] truncate font-medium">{assignee.name}</span>
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Panel>

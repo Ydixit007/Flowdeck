@@ -4,7 +4,9 @@ import * as React from "react";
 import { formatInTimeZone } from "date-fns-tz";
 import { Flag } from "lucide-react";
 import type { CalendarItem } from "@/server/tasks";
+import { Avatar } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/ui/misc";
+import { useApp } from "@/lib/client/store";
 
 interface Milestone {
   _id: string;
@@ -37,6 +39,7 @@ export function RoadmapTimeline({
 }) {
   // Read the clock once on mount; the roadmap does not need a live marker.
   const [now] = React.useState(() => Date.now());
+  const { user, members } = useApp();
 
   const rows = items
     .filter((item) => item.startAt || item.dueAt)
@@ -118,18 +121,29 @@ export function RoadmapTimeline({
 
       <div className="flex py-2">
         <div className="shrink-0" style={{ width: LABEL_COL }}>
-          {rows.map((item) => (
-            <div key={`label-${item.id}`} className="flex h-7 items-center px-3">
-              <button
-                type="button"
-                onClick={() => onSelect(item.id)}
-                title={item.title}
-                className="truncate text-left text-[11.5px] text-muted-foreground hover:text-foreground"
-              >
-                {item.title}
-              </button>
-            </div>
-          ))}
+          {rows.map((item) => {
+            const assignee = item.assigneeId
+              ? (user && item.assigneeId === user.id ? user : members.find((m) => m.id === item.assigneeId))
+              : null;
+            return (
+              <div key={`label-${item.id}`} className="flex h-7 items-center justify-between gap-1 px-3">
+                <button
+                  type="button"
+                  onClick={() => onSelect(item.id)}
+                  title={item.title}
+                  className="min-w-0 flex-1 truncate text-left text-[11.5px] text-muted-foreground hover:text-foreground"
+                >
+                  {item.title}
+                </button>
+                {assignee ? (
+                  <span className="flex shrink-0 items-center gap-1" title={`Assigned to ${assignee.name}`}>
+                    <Avatar name={assignee.name} src={assignee.avatar} size="xxs" />
+                    <span className="max-w-[45px] truncate text-[9px] text-muted-foreground">{assignee.name}</span>
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
 
         {/* Plot area: every % below is relative to this box, not the panel. */}

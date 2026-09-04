@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   CalendarRange,
+  Clock,
   Flag,
   GitBranch,
   ListTodo,
@@ -34,7 +35,7 @@ import { PROJECT_STATUSES } from "@/lib/types";
 import { RoadmapTimeline } from "@/components/projects/roadmap-timeline";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 
-type Tab = "overview" | "backlog" | "active" | "roadmap";
+type Tab = "overview" | "ongoing" | "planned" | "backlog" | "roadmap" | "active";
 
 interface ActivityRow {
   id: string;
@@ -58,11 +59,10 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
   const from = React.useMemo(() => new Date(dayStart(new Date(), timeZone).getTime() - 120 * 86_400_000), [timeZone]);
   const to = React.useMemo(() => new Date(dayStart(new Date(), timeZone).getTime() + 240 * 86_400_000), [timeZone]);
 
-  const { items, loading, reload, mutateItem } = useTasks({ from, to, projectId: [projectId] }, [
-    projectId,
-    from.toISOString(),
-    to.toISOString(),
-  ]);
+  const { items, loading, reload, mutateItem } = useTasks(
+    { from, to, projectId: [projectId], includeUnscheduled: true },
+    [projectId, from.toISOString(), to.toISOString()],
+  );
 
   React.useEffect(() => {
     if (project) setPageTitle(project.name);
@@ -86,14 +86,26 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
     const due = item.dueAt ?? item.startAt;
     return Boolean(due && new Date(due) < now);
   });
+  const ongoing = open.filter((item) => {
+    if (item.status === "IN_PROGRESS") return true;
+    if (item.startAt && item.dueAt) {
+      const start = new Date(item.startAt);
+      const due = new Date(item.dueAt);
+      return start <= now && now <= due;
+    }
+    return false;
+  });
   const backlog = open.filter((item) => !item.startAt && !item.dueAt);
-  const activeWork = open.filter((item) => item.status === "IN_PROGRESS" || Boolean(item.startAt));
-  const upcoming = open
-    .filter((item) => {
-      const anchor = item.startAt ?? item.dueAt;
-      return Boolean(anchor && new Date(anchor) >= now);
-    })
-    .slice(0, 8);
+  const planned = open.filter(
+    (item) =>
+      item.status !== "IN_PROGRESS" &&
+      !ongoing.some((o) => o.id === item.id) &&
+      ((!item.startAt && !item.dueAt) || item.status === "TODO"),
+  );
+  const upcoming = open.filter((item) => {
+    const anchor = item.startAt ?? item.dueAt;
+    return Boolean(anchor && new Date(anchor) >= now && !ongoing.some((o) => o.id === item.id));
+  });
 
   const percent = items.length > 0 ? Math.round((done.length / items.length) * 100) : 0;
 
@@ -219,6 +231,11 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
                   {formatInTimeZone(new Date(project.targetDate), timeZone, "d MMM yyyy")}
                 </Badge>
               ) : null}
+              {ongoing.length > 0 ? (
+                <Badge variant="primary">
+                  {ongoing.length} ongoing
+                </Badge>
+              ) : null}
               {overdue.length > 0 ? <Badge variant="danger">{overdue.length} overdue</Badge> : null}
               {project.repoUrl ? (
                 <a
@@ -282,7 +299,12 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
       <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="active">Active work</TabsTrigger>
+          <TabsTrigger value="ongoing">
+            Ongoing {ongoing.length > 0 ? <span className="ml-1 text-[10px] text-primary">({ongoing.length})</span> : null}
+          </TabsTrigger>
+          <TabsTrigger value="planned">
+            Planned {planned.length > 0 ? <span className="ml-1 text-[10px] text-muted-foreground">({planned.length})</span> : null}
+          </TabsTrigger>
           <TabsTrigger value="backlog">Backlog</TabsTrigger>
           <TabsTrigger value="roadmap">Roadmap</TabsTrigger>
         </TabsList>
@@ -295,18 +317,95 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
           ))}
         </div>
       ) : tab === "overview" ? (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Section title="Upcoming" icon={<CalendarRange />}>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Section
+            title="Ongoing"
+            icon={<Clock className="text-primary" />}
+            count={ongoing.length}
+            action={
+              ongoing.length > 6 ? (
+                <button
+                  type="button"
+                  onClick={() => setTab("ongoing")}
+                  className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  View all
+                </button>
+              ) : null
+            }
+          >
+            {ongoing.length === 0 ? (
+              <p className="px-1 py-4 text-center text-[12px] text-muted-foreground">No tasks in progress.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {ongoing.slice(0, 6).map((item) => (
+                  <li key={item.id}>
+                    <TaskBlock
+                      item={item}
+                      variant="row"
+                      timeZone={timeZone}
+                      hideProject
+                      onClick={() => setSelectedId(item.id)}
+                      onToggleStatus={() => toggleStatus(item)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          <Section
+            title="Planned"
+            icon={<ListTodo className="text-indigo-400" />}
+            count={planned.length}
+            action={
+              planned.length > 6 ? (
+                <button
+                  type="button"
+                  onClick={() => setTab("planned")}
+                  className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  View all
+                </button>
+              ) : null
+            }
+          >
+            {planned.length === 0 ? (
+              <p className="px-1 py-4 text-center text-[12px] text-muted-foreground">No planned tasks.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {planned.slice(0, 6).map((item) => (
+                  <li key={item.id}>
+                    <TaskBlock
+                      item={item}
+                      variant="row"
+                      timeZone={timeZone}
+                      hideProject
+                      onClick={() => setSelectedId(item.id)}
+                      onToggleStatus={() => toggleStatus(item)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          <Section
+            title="Upcoming"
+            icon={<CalendarRange className="text-emerald-400" />}
+            count={upcoming.length}
+          >
             {upcoming.length === 0 ? (
-              <p className="px-1 py-3 text-[12px] text-muted-foreground">Nothing scheduled ahead.</p>
+              <p className="px-1 py-4 text-center text-[12px] text-muted-foreground">Nothing scheduled ahead.</p>
             ) : (
               <ul className="space-y-1.5">
-                {upcoming.map((item) => (
+                {upcoming.slice(0, 6).map((item) => (
                   <li key={item.id}>
                     <TaskBlock
                       item={item}
                       variant="row"
                       timeZone={timeZone}
+                      hideProject
                       onClick={() => setSelectedId(item.id)}
                       onToggleStatus={() => toggleStatus(item)}
                     />
@@ -316,47 +415,28 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
             )}
           </Section>
 
-          <Section title="Overdue" icon={<AlertTriangle className="text-destructive" />}>
+          <Section
+            title="Overdue"
+            icon={<AlertTriangle className="text-destructive" />}
+            count={overdue.length}
+          >
             {overdue.length === 0 ? (
-              <p className="px-1 py-3 text-[12px] text-muted-foreground">Nothing overdue.</p>
+              <p className="px-1 py-4 text-center text-[12px] text-muted-foreground">Nothing overdue.</p>
             ) : (
               <ul className="space-y-1.5">
-                {overdue.map((item) => (
+                {overdue.slice(0, 6).map((item) => (
                   <li key={item.id}>
                     <TaskBlock
                       item={item}
                       variant="row"
                       timeZone={timeZone}
+                      hideProject
                       onClick={() => setSelectedId(item.id)}
                       onToggleStatus={() => toggleStatus(item)}
                     />
                   </li>
                 ))}
               </ul>
-            )}
-          </Section>
-
-          <Section title="Recent activity" icon={<ListTodo />}>
-            {activity.length === 0 ? (
-              <p className="px-1 py-3 text-[12px] text-muted-foreground">No activity recorded yet.</p>
-            ) : (
-              <ol className="space-y-2">
-                {activity.slice(0, 10).map((row) => {
-                  const actor = actors.find((a) => a.id === row.actorId);
-                  return (
-                    <li key={row.id} className="flex items-start gap-2">
-                      <Avatar name={actor?.name ?? "Someone"} src={actor?.avatar} size="xs" />
-                      <p className="min-w-0 flex-1 text-[12px] leading-snug">
-                        <span className="font-medium">{actor?.name ?? "Someone"}</span>{" "}
-                        <span className="text-muted-foreground">{row.summary}</span>
-                        <span className="block text-[10.5px] text-muted-foreground/70">
-                          {formatDistanceToNow(new Date(row.createdAt), { addSuffix: true })}
-                        </span>
-                      </p>
-                    </li>
-                  );
-                })}
-              </ol>
             )}
           </Section>
         </div>
@@ -410,12 +490,14 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
         </div>
       ) : (
         <TaskGroup
-          items={tab === "backlog" ? backlog : activeWork}
+          items={tab === "planned" ? planned : tab === "backlog" ? backlog : ongoing}
           timeZone={timeZone}
           emptyText={
-            tab === "backlog"
-              ? "Nothing in the backlog. Unscheduled tasks land here."
-              : "No active work. Schedule something or move a task to in progress."
+            tab === "planned"
+              ? "No planned tasks. Unscheduled tasks and to-dos appear here."
+              : tab === "backlog"
+                ? "Nothing in the backlog. Unscheduled tasks land here."
+                : "No ongoing tasks. Move a task to in progress or schedule something for today."
           }
           onSelect={setSelectedId}
           onToggle={toggleStatus}
@@ -434,16 +516,34 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
   );
 }
 
-function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Section({
+  title,
+  icon,
+  count,
+  action,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  count?: number;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="fd-panel flex flex-col">
-      <header className="border-b border-border px-3.5 py-2.5">
+    <section className="fd-panel flex flex-col overflow-hidden">
+      <header className="flex items-center justify-between border-b border-border bg-surface-raised/40 px-3.5 py-2.5">
         <h2 className="flex items-center gap-2 text-[13px] font-semibold [&_svg]:size-4">
           {icon}
-          {title}
+          <span>{title}</span>
+          {count !== undefined ? (
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+              {count}
+            </span>
+          ) : null}
         </h2>
+        {action}
       </header>
-      <div className="flex-1 p-3">{children}</div>
+      <div className="flex-1 p-2.5 sm:p-3">{children}</div>
     </section>
   );
 }
@@ -475,6 +575,7 @@ function TaskGroup({
           <TaskBlock
             item={item}
             variant="row"
+            hideProject
             timeZone={timeZone}
             onClick={() => onSelect(item.id)}
             onToggleStatus={() => onToggle(item)}

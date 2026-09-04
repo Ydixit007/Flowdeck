@@ -139,17 +139,21 @@ export function buildCalendarItems(
 
 /** Tasks that may produce items in the window: either directly scheduled inside
  *  it, or a recurring series that started before the window ends. */
-export function windowQuery(window: { from: Date; to: Date }) {
+export function windowQuery(window: { from: Date; to: Date }, includeUnscheduled = false) {
+  const clauses: Record<string, unknown>[] = [
+    { startAt: { $gte: window.from, $lte: window.to } },
+    { dueAt: { $gte: window.from, $lte: window.to } },
+    // Long tasks spanning the window.
+    { startAt: { $lt: window.from }, dueAt: { $gt: window.to } },
+    // Recurring series anchored before the window end.
+    { recurrence: { $ne: null }, startAt: { $lte: window.to } },
+    { recurrence: { $ne: null }, startAt: null, dueAt: { $lte: window.to } },
+  ];
+  if (includeUnscheduled) {
+    clauses.push({ startAt: null, dueAt: null });
+  }
   return {
-    $and: [{ $or: [
-      { startAt: { $gte: window.from, $lte: window.to } },
-      { dueAt: { $gte: window.from, $lte: window.to } },
-      // Long tasks spanning the window.
-      { startAt: { $lt: window.from }, dueAt: { $gt: window.to } },
-      // Recurring series anchored before the window end.
-      { recurrence: { $ne: null }, startAt: { $lte: window.to } },
-      { recurrence: { $ne: null }, startAt: null, dueAt: { $lte: window.to } },
-    ] }],
+    $and: [{ $or: clauses }],
   };
 }
 

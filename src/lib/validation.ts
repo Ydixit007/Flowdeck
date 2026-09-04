@@ -172,6 +172,7 @@ export const taskQuerySchema = z.object({
   contentStatus: z.union([z.enum(CONTENT_STATUSES), z.array(z.enum(CONTENT_STATUSES))]).optional(),
   isContent: z.enum(["true", "false"]).optional(),
   unscheduled: z.enum(["true", "false"]).optional(),
+  includeUnscheduled: z.enum(["true", "false"]).optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 

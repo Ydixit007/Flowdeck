@@ -31,15 +31,31 @@ export function MonthGrid({
   const byDay = React.useMemo(() => {
     const map = new Map<string, CalendarItem[]>();
     for (const item of items) {
-      const anchor = item.startAt ?? item.dueAt;
-      if (!anchor) continue;
-      const key = dayKey(anchor, timeZone);
-      const list = map.get(key) ?? [];
-      list.push(item);
-      map.set(key, list);
+      if (item.allDay) {
+        const startAnchor = item.startAt ?? item.dueAt;
+        if (!startAnchor) continue;
+        const startK = dayKey(startAnchor, timeZone);
+        const endK = item.dueAt ? dayKey(item.dueAt, timeZone) : startK;
+        const maxK = endK >= startK ? endK : startK;
+        for (const day of days) {
+          const k = dayKey(day, timeZone);
+          if (k >= startK && k <= maxK) {
+            const list = map.get(k) ?? [];
+            list.push(item);
+            map.set(k, list);
+          }
+        }
+      } else {
+        const anchor = item.startAt ?? item.dueAt;
+        if (!anchor) continue;
+        const key = dayKey(anchor, timeZone);
+        const list = map.get(key) ?? [];
+        list.push(item);
+        map.set(key, list);
+      }
     }
     return map;
-  }, [items, timeZone]);
+  }, [days, items, timeZone]);
 
   const weekdayLabels = days.slice(0, 7).map((day) => formatInTimeZone(day, timeZone, "EEE"));
 

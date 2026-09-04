@@ -68,9 +68,15 @@ export function QuickAddDialog({
     setProjectId(defaults.projectId ?? "");
     setAssigneeId(user.id);
     setPriority("NONE");
-    setStartLocal(defaults.startAt ? localInputValue(defaults.startAt, timezone, Boolean(defaults.allDay)) : "");
-    setAllDay(defaults.allDay ?? true);
-    setDueLocal("");
+    const isAllDay = defaults.allDay ?? true;
+    setAllDay(isAllDay);
+    setStartLocal(defaults.startAt ? localInputValue(defaults.startAt, timezone, Boolean(isAllDay)) : "");
+    const defaultEnd = defaults.dueAt
+      ? defaults.dueAt
+      : defaults.startAt && !isAllDay
+        ? new Date(defaults.startAt.getTime() + 30 * 60_000)
+        : null;
+    setDueLocal(defaultEnd ? localInputValue(defaultEnd, timezone, Boolean(isAllDay)) : "");
     setRecurrence(null);
     setSelectedTagIds([]);
     setIsContent(Boolean(defaults.isContent));
@@ -209,10 +215,16 @@ export function QuickAddDialog({
                         onChange={(e) => {
                           const next = !e.target.checked;
                           setAllDay(next);
-                          const toMode = (current: string): string =>
-                            current ? (next ? current.slice(0, 10) : `${current.slice(0, 10)}T09:00`) : current;
-                          setStartLocal(toMode);
-                          setDueLocal(toMode);
+                          if (!next) {
+                            const baseDate = startLocal
+                              ? startLocal.slice(0, 10)
+                              : localInputValue(new Date(), timezone, true);
+                            setStartLocal(`${baseDate}T09:00`);
+                            setDueLocal(`${baseDate}T09:30`);
+                          } else {
+                            setStartLocal((c) => (c ? c.slice(0, 10) : ""));
+                            setDueLocal((c) => (c ? c.slice(0, 10) : ""));
+                          }
                         }}
                         className="size-3.5 accent-[var(--primary)]"
                       />

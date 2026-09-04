@@ -38,9 +38,18 @@ export function CalendarView({
 
   const range = React.useMemo(() => buildRange(view, anchor, timeZone), [view, anchor, timeZone]);
 
+  const queryFilters = React.useMemo<TaskFilters>(
+    () => ({
+      ...filters,
+      assigneeId: contentOnly ? filters.assigneeId : "me",
+      isContent: contentOnly ? true : undefined,
+    }),
+    [filters, contentOnly],
+  );
+
   const { items, loading, reload, mutateItem } = useTasks(
-    { from: range.from, to: range.to, ...filters, isContent: contentOnly ? true : undefined },
-    [range.from.toISOString(), range.to.toISOString(), JSON.stringify(filters), contentOnly],
+    { from: range.from, to: range.to, ...queryFilters },
+    [range.from.toISOString(), range.to.toISOString(), JSON.stringify(queryFilters)],
   );
 
   /** Optimistic drag/resize: the block moves immediately, the server follows. */
@@ -121,7 +130,12 @@ export function CalendarView({
 
         <div className="flex-1" />
 
-        <FilterBar filters={filters} onChange={setFilters} showContentFilters={contentOnly} />
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          showContentFilters={contentOnly}
+          showAssigneeFilter={contentOnly}
+        />
 
         <Tabs value={view} onValueChange={(value) => setView(value as CalendarView)} className="hidden sm:block">
           <TabsList>

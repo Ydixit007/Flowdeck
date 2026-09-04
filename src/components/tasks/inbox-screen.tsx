@@ -17,7 +17,7 @@ import type { CalendarItem } from "@/server/tasks";
 /** Fast capture: type an idea, hit enter, schedule it later. */
 export function InboxScreen() {
   const { workspaceId, user } = useApp();
-  const { items, loading, reload, mutateItem } = useTasks({ unscheduled: true }, ["inbox"]);
+  const { items, loading, reload, mutateItem } = useTasks({ unscheduled: true, assigneeId: "me" }, ["inbox"]);
   const [draft, setDraft] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -29,7 +29,7 @@ export function InboxScreen() {
     setDraft("");
     setSaving(true);
     try {
-      await api.post("/api/tasks", { workspaceId, title, visibility: "PRIVATE" });
+      await api.post("/api/tasks", { workspaceId, title, visibility: "PRIVATE", assigneeId: user.id });
       await reload();
     } catch (error) {
       setDraft(title);
@@ -42,8 +42,14 @@ export function InboxScreen() {
   const schedule = async (item: CalendarItem, value: string, allDay: boolean): Promise<void> => {
     if (!value) return;
     const startAt = parseLocalInput(value, user.timezone, allDay);
-    await mutateItem(item.id, { startAt: startAt.toISOString(), allDay }, () =>
-      api.patch(`/api/tasks/${item.taskId}`, { startAt: startAt.toISOString(), allDay, scope: "SERIES" }),
+    const assigneeId = item.assigneeId ?? user.id;
+    await mutateItem(item.id, { startAt: startAt.toISOString(), allDay, assigneeId }, () =>
+      api.patch(`/api/tasks/${item.taskId}`, {
+        startAt: startAt.toISOString(),
+        allDay,
+        assigneeId,
+        scope: "SERIES",
+      }),
     );
     toast.success("Scheduled");
     await reload();

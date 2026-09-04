@@ -86,16 +86,31 @@ export function TimeGrid({
     const timedByDay = new Map<string, CalendarItem[]>();
     const allDayByDay = new Map<string, CalendarItem[]>();
     for (const item of items) {
-      const anchor = item.startAt ?? item.dueAt;
-      if (!anchor) continue;
-      const key = dayKey(anchor, timeZone);
-      const bucket = item.allDay ? allDayByDay : timedByDay;
-      const list = bucket.get(key) ?? [];
-      list.push(item);
-      bucket.set(key, list);
+      if (item.allDay) {
+        const startAnchor = item.startAt ?? item.dueAt;
+        if (!startAnchor) continue;
+        const startK = dayKey(startAnchor, timeZone);
+        const endK = item.dueAt ? dayKey(item.dueAt, timeZone) : startK;
+        const maxK = endK >= startK ? endK : startK;
+        for (const day of days) {
+          const k = dayKey(day, timeZone);
+          if (k >= startK && k <= maxK) {
+            const list = allDayByDay.get(k) ?? [];
+            list.push(item);
+            allDayByDay.set(k, list);
+          }
+        }
+      } else {
+        const anchor = item.startAt ?? item.dueAt;
+        if (!anchor) continue;
+        const key = dayKey(anchor, timeZone);
+        const list = timedByDay.get(key) ?? [];
+        list.push(item);
+        timedByDay.set(key, list);
+      }
     }
     return { timed: timedByDay, allDay: allDayByDay };
-  }, [items, timeZone]);
+  }, [days, items, timeZone]);
 
   const finishDrag = React.useCallback(
     (state: DragState) => {
@@ -311,6 +326,20 @@ export function TimeGrid({
                   const visible = !dragging || drag.previewDayIndex === dayIndex;
                   if (!visible) return null;
 
+                  const targetDay = days[dragging ? drag.previewDayIndex : dayIndex] ?? day;
+                  const previewStart = dragging
+                    ? new Date(targetDay.getTime() + startMinutes * 60_000).toISOString()
+                    : item.startAt;
+                  const previewDue = dragging
+                    ? new Date(targetDay.getTime() + (startMinutes + duration) * 60_000).toISOString()
+                    : (item.dueAt ?? (item.startAt ? new Date(new Date(item.startAt).getTime() + duration * 60_000).toISOString() : null));
+
+                  const displayItem: CalendarItem = {
+                    ...item,
+                    startAt: previewStart,
+                    dueAt: previewDue,
+                  };
+
                   return (
                     <div
                       key={item.id}
@@ -321,7 +350,7 @@ export function TimeGrid({
                       }}
                     >
                       <TaskBlock
-                        item={item}
+                        item={displayItem}
                         variant="block"
                         timeZone={timeZone}
                         onClick={() => onSelectItem(item.id)}

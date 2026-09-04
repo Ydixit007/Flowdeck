@@ -25,7 +25,7 @@ import {
 } from "@/lib/types";
 import { CONTENT_STATUS_META, PLATFORM_META, PRIORITY_META, STATUS_META } from "@/components/tasks/task-meta";
 
-export function countActiveFilters(filters: TaskFilters): number {
+export function countActiveFilters(filters: TaskFilters, showAssigneeFilter = true): number {
   return (
     (filters.projectId?.length ?? 0) +
     (filters.status?.length ?? 0) +
@@ -33,7 +33,7 @@ export function countActiveFilters(filters: TaskFilters): number {
     (filters.tagId?.length ?? 0) +
     (filters.platform?.length ?? 0) +
     (filters.contentStatus?.length ?? 0) +
-    (filters.assigneeId ? 1 : 0)
+    (showAssigneeFilter && filters.assigneeId ? 1 : 0)
   );
 }
 
@@ -42,13 +42,15 @@ export function FilterBar({
   filters,
   onChange,
   showContentFilters = false,
+  showAssigneeFilter = true,
 }: {
   filters: TaskFilters;
   onChange: (next: TaskFilters) => void;
   showContentFilters?: boolean;
+  showAssigneeFilter?: boolean;
 }) {
   const { projects, tags, members, user } = useApp();
-  const active = countActiveFilters(filters);
+  const active = countActiveFilters(filters, showAssigneeFilter);
 
   const toggle = <K extends keyof TaskFilters>(key: K, value: string): void => {
     const current = (filters[key] as string[] | undefined) ?? [];
@@ -129,7 +131,7 @@ export function FilterBar({
             </>
           ) : null}
 
-          {members.length > 1 ? (
+          {showAssigneeFilter && members.length > 1 ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuLabel>Assignee</DropdownMenuLabel>
@@ -209,6 +211,11 @@ export function FilterBar({
               {STATUS_META[status].label}
             </Badge>
           ))}
+          {(filters.priority ?? []).map((priority) => (
+            <Badge key={priority} variant="outline">
+              {PRIORITY_META[priority as Priority].label}
+            </Badge>
+          ))}
           {(filters.projectId ?? []).map((id) => (
             <Badge key={id} variant="outline">
               {projects.find((p) => p.id === id)?.name ?? "Project"}
@@ -219,6 +226,29 @@ export function FilterBar({
               #{tags.find((t) => t.id === id)?.name ?? "tag"}
             </Badge>
           ))}
+          {showAssigneeFilter && filters.assigneeId ? (
+            <Badge variant="outline">
+              {filters.assigneeId === "me"
+                ? "Assigned to me"
+                : filters.assigneeId === "none"
+                  ? "Unassigned"
+                  : (members.find((m) => m.id === filters.assigneeId)?.name ?? "Assignee")}
+            </Badge>
+          ) : null}
+          {showContentFilters
+            ? (filters.platform ?? []).map((platform) => (
+                <Badge key={platform} variant="outline">
+                  {PLATFORM_META[platform as Platform].label}
+                </Badge>
+              ))
+            : null}
+          {showContentFilters
+            ? (filters.contentStatus ?? []).map((status) => (
+                <Badge key={status} variant="outline">
+                  {CONTENT_STATUS_META[status as ContentStatus].label}
+                </Badge>
+              ))
+            : null}
           <Button variant="ghost" size="sm" onClick={() => onChange({})}>
             <X /> Clear
           </Button>

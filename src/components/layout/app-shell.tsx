@@ -27,6 +27,7 @@ interface ShellContextValue {
 
 export interface QuickAddDefaults {
   startAt?: Date;
+  dueAt?: Date;
   projectId?: string;
   isContent?: boolean;
   allDay?: boolean;

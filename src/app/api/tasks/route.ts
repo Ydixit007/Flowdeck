@@ -37,9 +37,18 @@ export async function GET(request: NextRequest) {
     const contentStatuses = asArray(query.contentStatus);
     if (contentStatuses) filter["content.contentStatus"] = { $in: contentStatuses };
     if (query.isContent) filter.isContent = query.isContent === "true";
-    if (query.assigneeId === "me") filter.assigneeId = user._id;
-    else if (query.assigneeId === "none") filter.assigneeId = null;
-    else if (query.assigneeId) filter.assigneeId = new Types.ObjectId(query.assigneeId);
+    if (query.assigneeId === "me") {
+      filter.$and = [
+        ...((filter.$and as unknown[]) ?? []),
+        {
+          $or: [{ assigneeId: user._id }, { creatorId: user._id, assigneeId: null }],
+        },
+      ];
+    } else if (query.assigneeId === "none") {
+      filter.assigneeId = null;
+    } else if (query.assigneeId) {
+      filter.assigneeId = new Types.ObjectId(query.assigneeId);
+    }
 
     // Inbox mode: unscheduled items only, no occurrence expansion needed.
     if (query.unscheduled === "true") {
@@ -63,7 +72,7 @@ export async function GET(request: NextRequest) {
     }
 
     const window = { from: query.from, to: query.to };
-    const tasks = await Task.find(andFilters(filter, windowQuery(window)))
+    const tasks = await Task.find(andFilters(filter, windowQuery(window, query.includeUnscheduled === "true")))
       .limit(query.limit ?? 500)
       .lean<TaskDoc[]>();
     const overrides = await TaskOccurrence.find({
@@ -100,7 +109,9 @@ export async function POST(request: NextRequest) {
       input.dueAt ??
       (input.startAt && input.estimatedMinutes
         ? new Date(input.startAt.getTime() + input.estimatedMinutes * 60_000)
-        : null);
+        : input.startAt && !input.allDay
+          ? new Date(input.startAt.getTime() + 30 * 60_000)
+          : null);
 
     const task = await Task.create({
       ...input,
