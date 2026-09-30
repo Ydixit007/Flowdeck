@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown";
 import { NotificationsMenu } from "@/components/layout/notifications-menu";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { DashboardSwitch } from "@/components/layout/dashboard-switch";
 
 export function Topbar({
   title,
@@ -33,7 +34,7 @@ export function Topbar({
   onOpenMobileNav: () => void;
 }) {
   const router = useRouter();
-  const { user } = useApp();
+  const { user, smolAdmin } = useApp();
 
   const signOut = async (): Promise<void> => {
     try {
@@ -57,6 +58,8 @@ export function Topbar({
       </Button>
 
       <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight">{title}</h1>
+
+      {smolAdmin ? <DashboardSwitch current="flowdeck" /> : null}
 
       <button
         onClick={onOpenPalette}

@@ -15,6 +15,7 @@ import { InviteDialog } from "@/components/layout/invite-dialog";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { InstallPrompt } from "@/components/layout/install-prompt";
 import { OfflineBanner } from "@/components/layout/offline-banner";
+import { lastDashboard, rememberDashboard } from "@/components/layout/dashboard-switch";
 
 const PRESENCE_INTERVAL_MS = 90_000;
 
@@ -44,7 +45,7 @@ export function useShell(): ShellContextValue {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { workspaceId } = useApp();
+  const { workspaceId, smolAdmin } = useApp();
 
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [quickAddOpen, setQuickAddOpen] = React.useState(false);
@@ -57,6 +58,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const openQuickAdd = React.useCallback((defaults: QuickAddDefaults = {}) => {
     setQuickAddDefaults(defaults);
     setQuickAddOpen(true);
+  }, []);
+
+  // Landing on Today reopens SmolBusiness if that was the last dashboard used.
+  React.useEffect(() => {
+    if (smolAdmin && pathname === "/" && lastDashboard() === "smol") router.replace("/smol");
+    else rememberDashboard("flowdeck");
+    // Once per shell mount; later navigation inside Flowdeck is not a switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Presence heartbeat: only while the tab is visible, so it reflects real use.

@@ -47,6 +47,8 @@ export interface MemberRef extends UserRef {
 
 interface AppState {
   user: PublicUser;
+  /** Can switch to the SmolBusiness dashboard. */
+  smolAdmin: boolean;
   workspaces: WorkspaceRef[];
   workspaceId: string;
   workspace: WorkspaceRef | undefined;
@@ -75,11 +77,13 @@ export function AppProvider({
   initialUser,
   initialWorkspaces,
   initialWorkspaceId,
+  smolAdmin = false,
   children,
 }: {
   initialUser: PublicUser;
   initialWorkspaces: WorkspaceRef[];
   initialWorkspaceId: string;
+  smolAdmin?: boolean;
   children: React.ReactNode;
 }) {
   const [user, setUser] = React.useState(initialUser);
@@ -179,6 +183,7 @@ export function AppProvider({
   const value = React.useMemo<AppState>(
     () => ({
       user,
+      smolAdmin,
       workspaces,
       workspaceId,
       workspace: workspaces.find((w) => w.id === workspaceId),
@@ -198,6 +203,7 @@ export function AppProvider({
     }),
     [
       user,
+      smolAdmin,
       workspaces,
       workspaceId,
       projects,

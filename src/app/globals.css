@@ -67,6 +67,18 @@
   --priority-none: oklch(0.6 0.012 265);
 }
 
+/* SmolBusiness admin gets its own accent (set on <html> by SmolShell) so the two dashboards never blur. */
+:root.smol-theme {
+  --primary: oklch(0.56 0.13 165);
+  --ring: oklch(0.62 0.12 165);
+  --primary-foreground: oklch(0.99 0.01 165);
+}
+:root.dark.smol-theme {
+  --primary: oklch(0.74 0.13 165);
+  --ring: oklch(0.7 0.12 165);
+  --primary-foreground: oklch(0.18 0.03 165);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);

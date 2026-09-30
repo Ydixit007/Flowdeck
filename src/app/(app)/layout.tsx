@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { connectDB } from "@/lib/db";
 import { listMemberships } from "@/server/authz";
 import { toPublicUser } from "@/server/users";
+import { isSmolAdmin } from "@/server/smol";
 import { Workspace, WorkspaceMember } from "@/models/Workspace";
 import { AppProvider, type WorkspaceRef } from "@/lib/client/store";
 import { AppShell } from "@/components/layout/app-shell";
@@ -50,6 +51,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       initialUser={toPublicUser(user)}
       initialWorkspaces={workspaces}
       initialWorkspaceId={workspaces[0]?.id ?? ""}
+      smolAdmin={isSmolAdmin(user)}
     >
       <AppShell>{children}</AppShell>
     </AppProvider>
