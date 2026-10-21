@@ -390,7 +390,14 @@ function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClo
             </div>
             <div className="space-y-1">
               <Label htmlFor="a-link">Link URL (optional)</Label>
-              <Input id="a-link" name="linkUrl" type="url" maxLength={2048} />
+              <Input
+                id="a-link"
+                name="linkUrl"
+                maxLength={2048}
+                placeholder="/seller/dashboard/… or https://…"
+                pattern="(/(?!/)|https?://)\S*"
+                title="A /path in the seller dashboard or an http(s) URL"
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="a-label">Link label</Label>

@@ -78,6 +78,8 @@ function markAbandoned<T extends mongoose.mongo.Document[]>(rows: T): T {
 function filterClause(name: SmolCollectionName, field: string, raw: string): Filter {
   if (name === "orders" && field === "status" && raw === "abandoned") return ABANDONED;
   if (name === "orders" && field === "status" && raw === "pending") return { status: "pending", stockReleased: { $ne: true } };
+  // Missing resolvedAt (pre-feature docs) counts as open.
+  if (field === "resolvedAt") return { resolvedAt: raw === "resolved" ? { $ne: null } : null };
   return { [field]: looseValue(raw) };
 }
 
@@ -155,6 +157,7 @@ async function loadFilterOptions(name: SmolCollectionName) {
   const entries = await Promise.all(
     def.filters.map(async ({ key }) => {
       if (name === "orders" && key === "status") return [key, SMOL_ORDER_STATUSES] as const;
+      if (key === "resolvedAt") return [key, ["open", "resolved"]] as const;
       const values = await col.distinct(key);
       const options = values
         .filter((v) => v !== null && v !== "" && typeof v !== "object")

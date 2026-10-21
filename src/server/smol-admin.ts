@@ -16,7 +16,8 @@ export const announcementInput = z.object({
   type: z.enum(SMOL_ANNOUNCEMENT_TYPES),
   releasedAt: optional(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)),
   imageUrl: optional(z.string().trim().url().max(2048)),
-  linkUrl: optional(z.string().trim().url().max(2048)),
+  // Seller-dashboard path ("/seller/...") or absolute http(s) URL; nothing else, so no javascript: hrefs.
+  linkUrl: optional(z.string().trim().max(2048).regex(/^(\/(?!\/)|https?:\/\/)\S*$/, "Use a /path or an http(s) URL")),
   linkLabel: optional(z.string().trim().max(40)),
   published: z.boolean(),
 });

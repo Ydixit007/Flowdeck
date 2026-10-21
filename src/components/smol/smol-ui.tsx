@@ -141,6 +141,12 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
 export function Cell({ column, row }: { column: SmolColumn; row: Row }) {
   const { storeName } = useSmol();
   const value = getPath(row, column.key);
+  if (column.kind === "resolved")
+    return value ? (
+      <Badge variant="success" title={fmtDate(value)}>resolved</Badge>
+    ) : (
+      <Badge variant="warning">open</Badge>
+    );
   if (value === undefined || value === null || value === "") return <span className="text-muted-foreground/50">—</span>;
   switch (column.kind) {
     case "money":

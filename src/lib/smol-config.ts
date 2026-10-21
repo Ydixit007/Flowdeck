@@ -1,6 +1,6 @@
 // Shared (client + server) description of the SmolBusiness collections the admin dashboard exposes.
 
-export type SmolKind = "text" | "money" | "number" | "date" | "bool" | "badge" | "store" | "long";
+export type SmolKind = "text" | "money" | "number" | "date" | "bool" | "badge" | "store" | "long" | "resolved";
 
 export interface SmolColumn {
   key: string;
@@ -269,14 +269,14 @@ export const SMOL_COLLECTIONS = {
     label: "Feature requests",
     group: "Platform",
     search: ["title", "description", "phone", "storeName"],
-    filters: [],
+    filters: [{ key: "resolvedAt", label: "Status" }],
     columns: [
       { key: "title", label: "Title" },
       { key: "description", label: "Description", kind: "long" },
       { key: "storeId", label: "Store", kind: "store" },
       { key: "phone", label: "Phone" },
       { key: "createdAt", label: "Created", kind: "date" },
-      { key: "resolvedAt", label: "Resolved", kind: "date" },
+      { key: "resolvedAt", label: "Status", kind: "resolved" },
     ],
     defaultSort: "createdAt",
     storeScoped: true,
@@ -285,7 +285,10 @@ export const SMOL_COLLECTIONS = {
     label: "Contacts",
     group: "Platform",
     search: ["storeName", "email", "phone", "message"],
-    filters: [{ key: "topic", label: "Topic" }],
+    filters: [
+      { key: "topic", label: "Topic" },
+      { key: "resolvedAt", label: "Status" },
+    ],
     columns: [
       { key: "storeName", label: "Store" },
       { key: "phone", label: "Phone" },
@@ -293,7 +296,7 @@ export const SMOL_COLLECTIONS = {
       { key: "topic", label: "Topic", kind: "badge" },
       { key: "message", label: "Message", kind: "long" },
       { key: "createdAt", label: "Received", kind: "date" },
-      { key: "resolvedAt", label: "Resolved", kind: "date" },
+      { key: "resolvedAt", label: "Status", kind: "resolved" },
     ],
     defaultSort: "createdAt",
     storeScoped: true,
