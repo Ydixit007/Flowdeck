@@ -18,7 +18,7 @@ import {
 const { ObjectId } = mongoose.mongo;
 type Filter = mongoose.mongo.Filter<mongoose.mongo.Document>;
 
-// Read-only by design: nothing in this module writes to the SmolBusiness database.
+// Read-only by design: the only writes live in smol-admin.ts.
 
 const SENSITIVE_KEY = /secret|password|hash|token|enc$|^otp$/i;
 

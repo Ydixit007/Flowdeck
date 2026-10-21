@@ -2,13 +2,15 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, RotateCcw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Plus, RotateCcw, Search, Undo2, X } from "lucide-react";
 import { api, qs } from "@/lib/client/api";
 import { cn } from "@/lib/utils";
-import { SMOL_COLLECTIONS, periodRange, type SmolCollectionName, type SmolColumn } from "@/lib/smol-config";
+import { SMOL_ANNOUNCEMENT_TYPES, SMOL_COLLECTIONS, SMOL_RESOLVABLE, periodRange, type SmolCollectionName, type SmolColumn } from "@/lib/smol-config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { Cell, PeriodPicker, Select, fmtDate, sellerHref, useSmol, useSmolFetch, useUrlState, type Row } from "@/components/smol/smol-ui";
 
@@ -86,7 +88,7 @@ export function CollectionView({
     void filterOptions(name).then(setOptions).catch(() => undefined);
   }, [name, def.filters.length]);
 
-  const { data: result, error, loading } = useSmolFetch<ListResult>(
+  const { data: result, error, loading, reload } = useSmolFetch<ListResult>(
     `/api/smol/${name}${qs({ q: urlQ, storeId, phone, f, from: range.from, to: range.to, sort, dir, page, limit })}`,
   );
 
@@ -103,6 +105,22 @@ export function CollectionView({
     set({ q: null, storeId: null, phone: null, f: null, period: null, from: null, to: null, page: null, sort: null, dir: null });
   };
   const columns = lockedStoreId ? def.columns.filter((column: SmolColumn) => column.kind !== "store") : def.columns;
+  const resolvable = SMOL_RESOLVABLE.has(name);
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
+  const [composing, setComposing] = React.useState(false);
+  const toggleResolved = async (row: Row) => {
+    setBusy(row._id);
+    setActionError(null);
+    try {
+      await api.patch(`/api/smol/${name}/${row._id}`, { resolved: !row.resolvedAt });
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not update");
+    } finally {
+      setBusy(null);
+    }
+  };
   const openRow = (row: Row) => (name === "stores" ? router.push(sellerHref(row._id)) : openRecord(name, row._id));
 
   const total = result?.total ?? 0;
@@ -134,6 +152,11 @@ export function CollectionView({
               {meta ? `${(meta.counts[name] ?? 0).toLocaleString("en-IN")} records in total` : " "} · click a row for details
             </p>
           </div>
+          {name === "announcements" ? (
+            <Button size="sm" onClick={() => setComposing(true)}>
+              <Plus /> New announcement
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -199,6 +222,8 @@ export function CollectionView({
           </div>
         ) : null}
 
+        {actionError ? <p className="border-b border-border px-3 py-2 text-[13px] text-destructive">{actionError}</p> : null}
+
         <div className="fd-scroll-thin overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="text-left text-[12px] text-muted-foreground">
@@ -226,13 +251,14 @@ export function CollectionView({
                     </th>
                   );
                 })}
+                {resolvable ? <th className="px-3 py-2" /> : null}
               </tr>
             </thead>
             <tbody className={cn("divide-y divide-border transition-opacity", loading && result && "opacity-60")}>
               {!result && loading
                 ? Array.from({ length: 8 }, (_, index) => (
                     <tr key={index}>
-                      <td colSpan={columns.length} className="px-3 py-2">
+                      <td colSpan={columns.length + (resolvable ? 1 : 0)} className="px-3 py-2">
                         <Skeleton className="h-5 w-full" />
                       </td>
                     </tr>
@@ -250,6 +276,23 @@ export function CollectionView({
                           <Cell column={column} row={row} />
                         </td>
                       ))}
+                      {resolvable ? (
+                        <td className="px-3 py-1.5 text-right">
+                          <Button
+                            variant={row.resolvedAt ? "ghost" : "secondary"}
+                            size="sm"
+                            className="h-7 text-[12px]"
+                            disabled={busy === row._id}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void toggleResolved(row);
+                            }}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            {row.resolvedAt ? <Undo2 /> : <Check />} {row.resolvedAt ? "Reopen" : "Resolve"}
+                          </Button>
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
             </tbody>
@@ -288,6 +331,90 @@ export function CollectionView({
           </div>
         </footer>
       </section>
+      {name === "announcements" ? (
+        <AnnouncementDialog open={composing} onClose={() => setComposing(false)} onCreated={reload} />
+      ) : null}
     </div>
+  );
+}
+
+function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    setError(null);
+    try {
+      await api.post("/api/smol/announcements", { ...Object.fromEntries(form), published: form.get("published") === "on" });
+      onCreated();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
+      <DialogContent size="lg">
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>New announcement</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="grid gap-3 text-[13px] sm:grid-cols-2">
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="a-title">Title</Label>
+              <Input id="a-title" name="title" required maxLength={140} />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="a-content">Content</Label>
+              <Textarea id="a-content" name="content" required maxLength={4000} rows={5} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="a-type">Type</Label>
+              <Select id="a-type" name="type" defaultValue="feature" className="w-full">
+                {SMOL_ANNOUNCEMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="a-released">Released</Label>
+              <Input id="a-released" name="releasedAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="a-link">Link URL (optional)</Label>
+              <Input id="a-link" name="linkUrl" type="url" maxLength={2048} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="a-label">Link label</Label>
+              <Input id="a-label" name="linkLabel" maxLength={40} />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="a-image">Image URL (optional)</Label>
+              <Input id="a-image" name="imageUrl" type="url" maxLength={2048} />
+            </div>
+            <label className="flex items-center gap-2 sm:col-span-2">
+              <input type="checkbox" name="published" defaultChecked /> Publish now (unchecked = draft, hidden from sellers)
+            </label>
+            {error ? <p className="text-destructive sm:col-span-2">{error}</p> : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

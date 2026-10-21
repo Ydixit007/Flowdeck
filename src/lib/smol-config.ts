@@ -268,14 +268,15 @@ export const SMOL_COLLECTIONS = {
   featurerequests: {
     label: "Feature requests",
     group: "Platform",
-    search: ["title", "description", "email", "status"],
-    filters: [{ key: "status", label: "Status" }],
+    search: ["title", "description", "phone", "storeName"],
+    filters: [],
     columns: [
       { key: "title", label: "Title" },
       { key: "description", label: "Description", kind: "long" },
       { key: "storeId", label: "Store", kind: "store" },
-      { key: "status", label: "Status", kind: "badge" },
+      { key: "phone", label: "Phone" },
       { key: "createdAt", label: "Created", kind: "date" },
+      { key: "resolvedAt", label: "Resolved", kind: "date" },
     ],
     defaultSort: "createdAt",
     storeScoped: true,
@@ -283,16 +284,19 @@ export const SMOL_COLLECTIONS = {
   contacts: {
     label: "Contacts",
     group: "Platform",
-    search: ["name", "email", "phone", "message", "subject"],
-    filters: [],
+    search: ["storeName", "email", "phone", "message"],
+    filters: [{ key: "topic", label: "Topic" }],
     columns: [
-      { key: "name", label: "Name" },
-      { key: "email", label: "Email" },
+      { key: "storeName", label: "Store" },
       { key: "phone", label: "Phone" },
+      { key: "email", label: "Email" },
+      { key: "topic", label: "Topic", kind: "badge" },
       { key: "message", label: "Message", kind: "long" },
       { key: "createdAt", label: "Received", kind: "date" },
+      { key: "resolvedAt", label: "Resolved", kind: "date" },
     ],
     defaultSort: "createdAt",
+    storeScoped: true,
   },
   otps: {
     label: "OTPs",
@@ -310,6 +314,11 @@ export const SMOL_COLLECTIONS = {
 } satisfies Record<string, SmolCollection>;
 
 export type SmolCollectionName = keyof typeof SMOL_COLLECTIONS;
+
+/** Collections ops can mark resolved (sets `resolvedAt`). */
+export const SMOL_RESOLVABLE = new Set<SmolCollectionName>(["contacts", "featurerequests"]);
+
+export const SMOL_ANNOUNCEMENT_TYPES = ["feature", "improvement", "fix", "notice"] as const;
 
 export function isSmolCollection(name: string): name is SmolCollectionName {
   return Object.hasOwn(SMOL_COLLECTIONS, name);
