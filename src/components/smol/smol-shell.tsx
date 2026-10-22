@@ -7,6 +7,9 @@ import { toast } from "sonner";
 import {
   BarChart3,
   Coins,
+  Download,
+  FileJson,
+  FileSpreadsheet,
   History,
   KeyRound,
   LayoutDashboard,
@@ -201,13 +204,57 @@ function SmolSidebar({ meta, dbName }: { meta: SmolMeta | null; dbName: string }
         ))}
       </nav>
 
-      <div className="flex items-center gap-2 border-t border-border px-4 py-2.5 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-2 border-t border-border py-1.5 pl-4 pr-2 text-[11px] text-muted-foreground">
         <Lock className="size-3 shrink-0" />
-        <span className="truncate">
+        <span className="flex-1 truncate">
           Read-only · <span className="font-mono">{dbName}</span>
         </span>
+        <ExportButton />
       </div>
     </aside>
+  );
+}
+
+function ExportButton() {
+  const [busy, setBusy] = React.useState(false);
+  const download = async (format: "json" | "csv"): Promise<void> => {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/smol/export?format=${format}`);
+      if (!response.ok) throw new Error(((await response.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message);
+      const name = /filename="(.+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? `smol-export.${format}`;
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const run = (format: "json" | "csv") =>
+    toast.promise(download(format), {
+      loading: "Exporting database + PostHog…",
+      success: "Export downloaded",
+      error: (error: Error) => error.message || "Export failed",
+    });
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-7" disabled={busy} aria-label="Export all data" title="Export all data">
+          <Download className="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top">
+        <DropdownMenuItem onSelect={() => run("json")}>
+          <FileJson /> JSON (single file)
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => run("csv")}>
+          <FileSpreadsheet /> CSV (zip, one per table)
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

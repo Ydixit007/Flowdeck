@@ -37,7 +37,7 @@ export async function requireSmolAdmin(): Promise<AuthUser> {
 }
 
 /** ObjectIds → hex, Dates → ISO, secrets masked. OTP codes are masked too. */
-function toPlain<T>(value: T, collection?: string): T {
+export function toPlain<T>(value: T, collection?: string): T {
   return JSON.parse(
     JSON.stringify(value, (key, v) =>
       SENSITIVE_KEY.test(key) || (collection === "otps" && key === "code") ? "••••" : v,

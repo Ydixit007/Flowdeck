@@ -22,7 +22,7 @@ export type SmolAnalyticsQuery = z.infer<typeof smolAnalyticsQuery>;
 
 type Row = Record<string, unknown>;
 
-async function hog(sql: string): Promise<Row[]> {
+export async function hog(sql: string): Promise<Row[]> {
   const { POSTHOG_HOST, POSTHOG_PROJECT_ID, POSTHOG_API_KEY } = process.env;
   const response = await fetch(`${POSTHOG_HOST ?? "https://eu.posthog.com"}/api/projects/${POSTHOG_PROJECT_ID}/query/`, {
     method: "POST",
