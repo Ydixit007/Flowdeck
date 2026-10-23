@@ -421,3 +421,27 @@ export function bucketKeys(from: string, to: string, interval: SmolInterval): st
 export function getPath(doc: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((value, key) => (value as Record<string, unknown> | null)?.[key], doc);
 }
+
+export type SmolMediaRef = { r2: string } | { firebase: { bucket: string; path: string } };
+
+const R2_KEY = String.raw`(?:products|payment-proofs|ig-imports)/[\w.-]+`;
+const R2_IN_URL = new RegExp(String.raw`/api/upload/img/(${R2_KEY})`, "g");
+const R2_BARE = new RegExp(`^${R2_KEY}$`);
+const FIREBASE_URL = /firebasestorage\.googleapis\.com\/v0\/b\/([^/]+)\/o\/([^?#"'\s)]+)/g;
+
+/** Every stored file a document points at: R2 proxy URLs, bare R2 keys (payment proofs), legacy Firebase URLs. */
+export function mediaRefs(value: unknown, out = new Map<string, SmolMediaRef>()): Map<string, SmolMediaRef> {
+  if (typeof value === "string") {
+    if (R2_BARE.test(value)) out.set(`r2:${value}`, { r2: value });
+    for (const [, key = ""] of value.matchAll(R2_IN_URL)) out.set(`r2:${key}`, { r2: key });
+    for (const [, bucket = "", raw = ""] of value.matchAll(FIREBASE_URL)) {
+      const path = decodeURIComponent(raw);
+      out.set(`fb:${bucket}/${path}`, { firebase: { bucket, path } });
+    }
+  } else if (Array.isArray(value)) {
+    for (const item of value) mediaRefs(item, out);
+  } else if (value && typeof value === "object" && !(value instanceof Date) && !("_bsontype" in value)) {
+    for (const item of Object.values(value)) mediaRefs(item, out);
+  }
+  return out;
+}

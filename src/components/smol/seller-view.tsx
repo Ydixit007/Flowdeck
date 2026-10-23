@@ -2,11 +2,17 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { ArrowLeft, AtSign, ExternalLink, Globe, Mail, Phone, Store } from "lucide-react";
+import { ArrowLeft, AtSign, ExternalLink, Globe, Mail, Phone, Store, Trash2 } from "lucide-react";
+import { api, qs } from "@/lib/client/api";
 import { cn } from "@/lib/utils";
 import { SMOL_COLLECTIONS, SMOL_LOW_BALANCE, type SmolCollectionName } from "@/lib/smol-config";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { CollectionView } from "@/components/smol/collection-view";
 import { Kpi, Panel, RecordFields, badgeVariant, fmtDate, money, num, useSmolFetch, useUrlState, type Row } from "@/components/smol/smol-ui";
@@ -133,6 +139,7 @@ export function SellerView({ id }: { id: string }) {
             {related.lastOrderAt ? formatDistanceToNow(new Date(related.lastOrderAt), { addSuffix: true }) : "never"}
           </p>
         </div>
+        <DeleteSeller id={id} domain={String(doc.domain ?? "")} storeName={String(doc.storeName ?? "this seller")} />
       </section>
 
       {/* KPIs */}
@@ -236,5 +243,70 @@ export function SellerView({ id }: { id: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** Irreversible: typing the store's domain arms the button. */
+function DeleteSeller({ id, domain, storeName }: { id: string; domain: string; storeName: string }) {
+  const router = useRouter();
+  const [open, setOpen] = React.useState(false);
+  const [typed, setTyped] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const result = await api.delete<{ r2Files: number; r2Skipped: number; firebaseFailed: string[]; customDomain: string | null; customDomainSkipped: boolean }>(
+        `/api/smol/stores/${id}${qs({ confirm: typed })}`,
+      );
+      const left = [
+        result.r2Skipped ? `${result.r2Skipped} R2 files (SMOL_R2_* not set)` : null,
+        result.firebaseFailed.length ? `${result.firebaseFailed.length} legacy Firebase files` : null,
+        result.customDomainSkipped ? `custom domain ${result.customDomain} on Vercel (SMOL_VERCEL_* not set)` : null,
+      ].filter(Boolean);
+      if (left.length) toast.warning(`${storeName} deleted from the database. Left behind: ${left.join(", ")}`);
+      else toast.success(`${storeName} deleted with ${result.r2Files} files`);
+      router.replace("/smol/stores");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete seller");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Button variant="destructive" size="sm" onClick={() => setOpen(true)} disabled={!domain}>
+        <Trash2 /> Delete seller
+      </Button>
+      <Dialog open={open} onOpenChange={(next) => {
+          if (busy) return;
+          setOpen(next);
+          setTyped("");
+        }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {storeName}?</DialogTitle>
+            <DialogDescription>
+              Permanently removes the store, its custom domain and uploaded images and videos (when R2/Vercel access is configured), and all of its orders, products, customers, reviews,
+              coupons, credits, billing and support records. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-1 text-[13px]">
+            <label htmlFor="confirm-domain">
+              Type <span className="font-mono font-semibold">{domain}</span> to confirm
+            </label>
+            <Input id="confirm-domain" value={typed} onChange={(event) => setTyped(event.target.value)} autoComplete="off" />
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={remove} disabled={busy || typed !== domain}>
+              {busy ? "Deleting…" : "Delete forever"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
