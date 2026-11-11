@@ -31,6 +31,8 @@ export const SMOL_COLLECTIONS = {
       { key: "theme", label: "Theme" },
       { key: "credits.plan", label: "Plan" },
       { key: "paymentConfig.method", label: "Payment" },
+      // Virtual: matched through sellernotes (SMOL-417), not a store field.
+      { key: "tags", label: "Tag" },
     ],
     columns: [
       { key: "storeName", label: "Store" },
@@ -301,6 +303,24 @@ export const SMOL_COLLECTIONS = {
     defaultSort: "createdAt",
     storeScoped: true,
   },
+  adminactions: {
+    label: "Admin log",
+    group: "Platform",
+    search: ["action", "reason", "by", "phone"],
+    filters: [
+      { key: "action", label: "Action" },
+      { key: "by", label: "Admin" },
+    ],
+    columns: [
+      { key: "createdAt", label: "When", kind: "date" },
+      { key: "storeId", label: "Store", kind: "store" },
+      { key: "action", label: "Action", kind: "badge" },
+      { key: "reason", label: "Reason", kind: "long" },
+      { key: "by", label: "By" },
+    ],
+    defaultSort: "createdAt",
+    storeScoped: true,
+  },
   otps: {
     label: "OTPs",
     group: "Platform",
@@ -327,6 +347,25 @@ export function isSmolCollection(name: string): name is SmolCollectionName {
   return Object.hasOwn(SMOL_COLLECTIONS, name);
 }
 
+export const ADMIN_ROLES = ["superadmin", "marketing"] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+/** Marketing contacts sellers: these store fields only, no buyer, order or billing data. */
+export const MARKETING_STORE_FIELDS = new Set(["storeName", "domain", "email", "phone", "countryCode", "instagram", "credits.plan", "status", "logoUrl", "createdAt", "tags"]);
+
+/** Free-form seller tags (SMOL-417): lowercase words, hyphens and spaces. */
+export const normalizeTag = (tag: string) => tag.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 30);
+
+export const canReadCollection = (role: AdminRole, name: SmolCollectionName) => role === "superadmin" || name === "stores";
+
+/** The collection as `role` may see it: marketing gets only MARKETING_STORE_FIELDS to search, filter and show. */
+export function visibleCollection(name: SmolCollectionName, role: AdminRole): SmolCollection {
+  const def: SmolCollection = SMOL_COLLECTIONS[name];
+  if (role === "superadmin") return def;
+  const ok = (key: string) => MARKETING_STORE_FIELDS.has(key);
+  return { ...def, search: def.search.filter(ok), filters: def.filters.filter((f) => ok(f.key)), columns: def.columns.filter((c) => ok(c.key)) };
+}
+
 /** ₹ per cycle. ponytail: mirrors smolBusiness-backend src/config/credits.ts PLANS; update both together. */
 export const SMOL_PLAN_PRICES: Record<string, { monthly: number; annual: number }> = {
   free: { monthly: 0, annual: 0 },
@@ -336,6 +375,15 @@ export const SMOL_PLAN_PRICES: Record<string, { monthly: number; annual: number 
 };
 /** Order lifecycle, in display order. `abandoned` is virtual: pending + stockReleased. */
 export const SMOL_ORDER_STATUSES = ["pending", "confirmed", "processing", "shipped", "delivered", "abandoned", "cancelled", "refunded"];
+
+/** Backend ALLOWED_TRANSITIONS, for which buttons to offer; the backend still decides. */
+export const SMOL_ORDER_NEXT: Record<string, string[]> = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["processing", "cancelled"],
+  processing: ["shipped", "cancelled"],
+  shipped: ["delivered"],
+  cancelled: ["refunded"],
+};
 
 /** Backend LOW_BALANCE_THRESHOLD: at or below this a seller is warned. */
 export const SMOL_LOW_BALANCE = 50;

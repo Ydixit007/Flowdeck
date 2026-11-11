@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db";
-import { createResetToken } from "@/lib/auth";
+import { createResetToken } from "@/lib/reset-token";
 import { fail, handleError, ok, parseBody } from "@/lib/api";
 import { clientKey, rateLimit } from "@/lib/rate-limit";
 import { forgotPasswordSchema } from "@/lib/validation";

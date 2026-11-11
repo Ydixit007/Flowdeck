@@ -1,16 +1,22 @@
 import "server-only";
 import mongoose from "mongoose";
 import { z } from "zod";
-import { ForbiddenError, NotFoundError, requireUser, type AuthUser } from "@/lib/auth";
+import { notFound } from "next/navigation";
+import { ForbiddenError, NotFoundError, getCurrentUser, requireUser, type AuthUser } from "@/lib/auth";
 import { smolDb } from "@/lib/smol-db";
 import { cached } from "@/lib/memo-cache";
+import { buildSubscriptionHistory, type SubBillingRow, type SubEventRow, type SubStoreRow } from "@/lib/smol-subscriptions";
 import {
+  MARKETING_STORE_FIELDS,
   SMOL_COLLECTIONS,
   SMOL_LOW_BALANCE,
   SMOL_ORDER_STATUSES,
   SMOL_PLAN_PRICES,
   bucketKeys,
+  canReadCollection,
   chartInterval,
+  visibleCollection,
+  type AdminRole,
   type SmolCollectionName,
   type SmolInterval,
 } from "@/lib/smol-config";
@@ -22,19 +28,26 @@ type Filter = mongoose.mongo.Filter<mongoose.mongo.Document>;
 
 const SENSITIVE_KEY = /secret|password|hash|token|enc$|^otp$/i;
 
-export function isSmolAdmin(user: Pick<AuthUser, "email">): boolean {
-  const allowed = (process.env.SMOL_ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  return allowed.includes(user.email.toLowerCase());
+export type AdminUser = AuthUser & { role: AdminRole };
+
+/** Any admin role passes; `"superadmin"` narrows it. Every /api/smol route calls this. */
+export async function requireAdmin(only?: "superadmin"): Promise<AdminUser> {
+  const user = await requireUser();
+  if (!user.role || (only && user.role !== only)) throw new ForbiddenError("Not allowed for your role");
+  return user as AdminUser;
 }
 
-export async function requireSmolAdmin(): Promise<AuthUser> {
-  const user = await requireUser();
-  if (!isSmolAdmin(user)) throw new ForbiddenError("SmolBusiness admin access required");
-  return user;
+/** Superadmin-only pages: anyone else gets a 404, same as a missing page. */
+export async function requireSuperadminPage(): Promise<void> {
+  if ((await getCurrentUser())?.role !== "superadmin") notFound();
 }
+
+/** Collection access for `user`, 403 otherwise. */
+export function assertCanRead(user: AdminUser, name: SmolCollectionName): void {
+  if (!canReadCollection(user.role, name)) throw new ForbiddenError("Not allowed for your role");
+}
+
+const MARKETING_PROJECTION = Object.fromEntries([...MARKETING_STORE_FIELDS].map((key) => [key, 1]));
 
 /** ObjectIds → hex, Dates → ISO, secrets masked. OTP codes are masked too. */
 export function toPlain<T>(value: T, collection?: string): T {
@@ -99,8 +112,8 @@ export const smolListQuery = z.object({
 });
 export type SmolListQuery = z.infer<typeof smolListQuery>;
 
-export async function listSmol(name: SmolCollectionName, query: SmolListQuery) {
-  const def = SMOL_COLLECTIONS[name];
+export async function listSmol(name: SmolCollectionName, query: SmolListQuery, role: AdminRole) {
+  const def = visibleCollection(name, role);
   const db = await smolDb();
   const col = db.collection(name);
 
@@ -111,14 +124,19 @@ export async function listSmol(name: SmolCollectionName, query: SmolListQuery) {
     if (isObjectId(query.q)) or.push({ _id: new ObjectId(query.q) });
     and.push({ $or: or });
   }
-  if (query.storeId && "storeScoped" in def) and.push({ storeId: new ObjectId(query.storeId) });
+  if (query.storeId && def.storeScoped) and.push({ storeId: new ObjectId(query.storeId) });
   if (query.phone && name === "orders") and.push({ "customerInfo.phone": query.phone });
 
   const allowedFilters = new Set<string>(def.filters.map((filter) => filter.key));
   for (const pair of [query.f ?? []].flat()) {
     const at = pair.indexOf(":");
     const field = pair.slice(0, at);
-    if (at > 0 && allowedFilters.has(field)) and.push(filterClause(name, field, pair.slice(at + 1)));
+    if (at <= 0 || !allowedFilters.has(field)) continue;
+    if (name === "stores" && field === "tags") {
+      and.push({ _id: { $in: await db.collection("sellernotes").distinct("storeId", { tags: pair.slice(at + 1) }) } });
+    } else {
+      and.push(filterClause(name, field, pair.slice(at + 1)));
+    }
   }
   if (query.from || query.to) {
     const range: Record<string, Date> = {};
@@ -147,8 +165,10 @@ export async function listSmol(name: SmolCollectionName, query: SmolListQuery) {
 }
 
 /** Dropdown options per declared filter, cached 5 min (the client also caches per session). */
-export function smolFilterOptions(name: SmolCollectionName) {
-  return cached(`options:${name}`, 5 * 60_000, () => loadFilterOptions(name));
+export async function smolFilterOptions(name: SmolCollectionName, role: AdminRole) {
+  const all = await cached(`options:${name}`, 5 * 60_000, () => loadFilterOptions(name));
+  const keys = new Set(visibleCollection(name, role).filters.map((filter) => filter.key));
+  return Object.fromEntries(Object.entries(all).filter(([key]) => keys.has(key)));
 }
 
 async function loadFilterOptions(name: SmolCollectionName) {
@@ -158,6 +178,7 @@ async function loadFilterOptions(name: SmolCollectionName) {
     def.filters.map(async ({ key }) => {
       if (name === "orders" && key === "status") return [key, SMOL_ORDER_STATUSES] as const;
       if (key === "resolvedAt") return [key, ["open", "resolved"]] as const;
+      if (name === "stores" && key === "tags") return [key, ((await (await smolDb()).collection("sellernotes").distinct("tags")) as string[]).sort()] as const;
       const values = await col.distinct(key);
       const options = values
         .filter((v) => v !== null && v !== "" && typeof v !== "object")
@@ -170,11 +191,15 @@ async function loadFilterOptions(name: SmolCollectionName) {
   return Object.fromEntries(entries);
 }
 
-export async function getSmolDoc(name: SmolCollectionName, id: string) {
+export async function getSmolDoc(name: SmolCollectionName, id: string, role: AdminRole) {
   if (!isObjectId(id)) throw new NotFoundError("Record not found");
   const db = await smolDb();
-  const doc = await db.collection(name).findOne({ _id: new ObjectId(id) });
+  const marketing = role !== "superadmin";
+  const doc = await db.collection(name).findOne({ _id: new ObjectId(id) }, marketing ? { projection: MARKETING_PROJECTION } : {});
   if (!doc) throw new NotFoundError("Record not found");
+  // Notes and tags are internal context both roles read (SMOL-417).
+  const notes = name === "stores" ? toPlain(await db.collection("sellernotes").findOne({ storeId: doc._id }, { projection: { _id: 0, tags: 1, notes: 1 } })) : undefined;
+  if (marketing) return { doc: toPlain(doc, name), related: null, notes };
 
   // Seller: how much of everything they own. Customer: their orders.
   let related: Record<string, unknown> | null = null;
@@ -212,7 +237,10 @@ export async function getSmolDoc(name: SmolCollectionName, id: string) {
         ])
         .next(),
     ]);
+    const subs = await loadSubscriptionHistory(new Date(), doc._id as mongoose.mongo.ObjectId);
     related = {
+      // Plan timeline: signups, renewals, plan changes, cancels and admin changes, newest first.
+      subscriptionTimeline: subs.activity,
       counts: Object.fromEntries(scoped.map((key, index) => [key, counts[index]])),
       paidRevenue: revenue?.total ?? 0,
       paidOrders: revenue?.count ?? 0,
@@ -231,12 +259,45 @@ export async function getSmolDoc(name: SmolCollectionName, id: string) {
     related = { orders: markAbandoned(orders) };
   }
 
-  return { doc: toPlain(doc, name), related: toPlain(related) };
+  return { doc: toPlain(doc, name), related: toPlain(related), notes };
+}
+
+const SUB_STORE_FIELDS = Object.fromEntries(
+  ["plan", "subscriptionId", "subscriptionStatus", "subscriptionProvider", "billingCycle", "cancelAtPeriodEnd", "currentPeriodEnd", "subscriptionTermEnd"].map((key) => [`credits.${key}`, 1]),
+);
+
+/** Subscription billing orders + backend subscriptionevents, for every seller or one. */
+// ponytail: reads all subscription history each time (small: one row per payment); window it once that's slow.
+async function loadSubscriptionHistory(now: Date, storeId?: mongoose.mongo.ObjectId) {
+  const db = await smolDb();
+  const match = storeId ? { storeId } : {};
+  const [rows, events] = await Promise.all([
+    db
+      .collection("billingorders")
+      .find({ ...match, kind: "subscription" }, { projection: { storeId: 1, planKey: 1, billingCycle: 1, amount: 1, gatewayOrderId: 1, gatewayPaymentId: 1, status: 1, createdAt: 1 } })
+      .toArray(),
+    db.collection("subscriptionevents").find(match).toArray(),
+  ]);
+  const ids = [...new Set([...rows, ...events].map((row) => String(row.storeId)))].filter(isObjectId);
+  const stores = await db
+    .collection("stores")
+    .find({ _id: { $in: ids.map((id) => new ObjectId(id)) } }, { projection: { storeName: 1, ...SUB_STORE_FIELDS } })
+    .toArray();
+  const plain = <T>(list: mongoose.mongo.Document[]) => list.map((row) => ({ ...row, storeId: String(row.storeId) }) as T);
+  const history = buildSubscriptionHistory(
+    plain<SubBillingRow>(rows),
+    plain<SubEventRow>(events),
+    stores.map((store) => ({ storeId: String(store._id), name: store.storeName, credits: store.credits }) as SubStoreRow),
+    now,
+  );
+  const names = new Map(stores.map((store) => [String(store._id), store.storeName as string | undefined]));
+  return { ...history, activity: history.activity.map((row) => ({ ...row, name: names.get(row.storeId) })) };
 }
 
 /** Sidebar counts + seller names, loaded once per shell mount and cached 60s. */
-export function smolMeta() {
-  return cached("meta", 60_000, loadMeta);
+export async function smolMeta(role: AdminRole) {
+  const meta = await cached("meta", 60_000, loadMeta);
+  return role === "superadmin" ? meta : { ...meta, counts: { stores: meta.counts.stores } };
 }
 
 async function loadMeta() {
@@ -324,6 +385,7 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
         gmv: { $sum: { $cond: [isPaid, "$totalAmount", 0] } },
         cod: { $sum: { $cond: [{ $and: [{ $eq: ["$paymentInfo.method", "cod"] }, { $not: [isAbandoned] }] }, 1, 0] } },
         sellers: { $addToSet: { $cond: [isAbandoned, "$$REMOVE", "$storeId"] } },
+        sellingStores: { $addToSet: { $cond: [isPaid, "$storeId", "$$REMOVE"] } },
       },
     },
     { $set: { activeSellers: { $size: "$sellers" } } },
@@ -356,7 +418,7 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
   const lowBalance = { $match: { "credits.balance": { $lte: SMOL_LOW_BALANCE }, $nor: [unlimitedNow] } };
   const expiresAt = { $ifNull: ["$expiresAt", null] };
 
-  const [o, l, b, c, st, pendingVerification, pendingReviews, recentOrders] = await Promise.all([
+  const [o, l, b, c, st, pendingVerification, pendingReviews, recentOrders, subs, journeyStores, productStores, paidStores] = await Promise.all([
     db
       .collection("orders")
       .aggregate([
@@ -374,8 +436,10 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
                   orders: { $sum: 1 },
                   paidOrders: { $sum: { $cond: [isPaid, 1, 0] } },
                   gmv: { $sum: { $cond: [isPaid, "$totalAmount", 0] } },
+                  sellingStores: { $addToSet: { $cond: [isPaid, "$storeId", "$$REMOVE"] } },
                 },
               },
+              { $set: { sellingStores: { $size: "$sellingStores" } } },
             ],
             byStore: [
               cur,
@@ -533,6 +597,11 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
       .sort({ createdAt: -1 })
       .limit(8)
       .toArray(),
+    loadSubscriptionHistory(now),
+    // ponytail: whole-collection scans for the seller journey; precompute per store once there are thousands of sellers.
+    stores.find(LIVE_STORE, { projection: STORE_CARD }).toArray(),
+    db.collection("products").distinct("storeId"),
+    db.collection("orders").aggregate([{ $match: { paymentStatus: "paid" } }, { $group: { _id: "$storeId", at: { $min: "$createdAt" } } }]).toArray(),
   ]);
 
   const first1 = (rows: unknown) => (rows as Doc[] | undefined)?.[0];
@@ -615,7 +684,7 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
   const series = new Map(
     bucketKeys(from, to, interval).map((key) => [
       key,
-      { key, orders: 0, paidOrders: 0, gmv: 0, newSellers: 0, creditsUsed: 0, billingRevenue: 0, creditsBought: 0 },
+      { key, orders: 0, paidOrders: 0, gmv: 0, sellingStores: 0, newSellers: 0, creditsUsed: 0, billingRevenue: 0, creditsBought: 0, mrr: 0, subscribers: 0 },
     ]),
   );
   for (const rows of [o?.series, l?.series, b?.series, st?.series] as (Doc[] | undefined)[]) {
@@ -624,6 +693,16 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
       if (point) Object.assign(point, values);
     }
   }
+  // MRR and paying subscribers as they stood at the end of each bucket.
+  const keys = [...series.keys()];
+  const bucketStart = (key: string) => dayStart(key.length === 7 ? `${key}-01` : key);
+  keys.forEach((key, index) => {
+    const at = index + 1 < keys.length ? new Date(bucketStart(keys[index + 1]!).getTime() - 1) : new Date(Math.min(end.getTime(), now.getTime()));
+    Object.assign(series.get(key)!, { mrr: subs.mrrAt(at), subscribers: subs.subscribersAt(at) });
+  });
+  const inWindow = (at: Date) => at >= start && at <= end;
+  const periodActivity = subs.activity.filter((row) => inWindow(row.at));
+
   const pendingBilling = first1(b?.pending);
   const card = (store: Doc) => ({
     storeId: store._id,
@@ -634,8 +713,53 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
     joinedAt: store.createdAt as Date | undefined,
   });
 
+  // Seller journey: signed up → added a product → got a paid order → on a paid plan, all-time and for this period's signups.
+  const hasProducts = new Set(productStores.map(String));
+  const firstSale = new Map(paidStores.map((row) => [String(row._id), new Date(row.at)]));
+  const STUCK_AFTER_MS = 3 * DAY_MS;
+  const STEPS: ((store: Doc) => boolean)[] = [
+    () => true,
+    (store) => hasProducts.has(String(store._id)),
+    (store) => firstSale.has(String(store._id)),
+    (store) => (store.credits?.plan ?? "free") !== "free",
+  ];
+  const funnel = (list: Doc[]) => STEPS.map((step) => list.filter(step).length);
+  const newestFirst = (a: Doc, b: Doc) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  const settled = journeyStores.filter((store) => now.getTime() - new Date(store.createdAt).getTime() > STUCK_AFTER_MS).sort(newestFirst);
+  const noProducts = settled.filter((store) => !hasProducts.has(String(store._id)));
+  const noOrders = settled.filter((store) => hasProducts.has(String(store._id)) && !firstSale.has(String(store._id)));
+  const ids = (rows: unknown) => new Set(((first1(rows)?.sellingStores ?? []) as unknown[]).map(String));
+  const sellingNow = ids(o?.current);
+  const sellingBefore = ids(o?.previous);
+  const activation = (a: Date, b: Date) => {
+    const joined = journeyStores.filter((store) => new Date(store.createdAt) >= a && new Date(store.createdAt) <= b);
+    const days = joined
+      .filter((store) => firstSale.has(String(store._id)))
+      .map((store) => (firstSale.get(String(store._id))!.getTime() - new Date(store.createdAt).getTime()) / DAY_MS)
+      .sort((x, y) => x - y);
+    return { joined: joined.length, sold: days.length, medianDays: days.length ? Math.max(0, Math.round(days[Math.floor(days.length / 2)]!)) : null };
+  };
+  const outcomes = {
+    sellingStores: sellingNow.size,
+    sellingStoresBefore: compare ? sellingBefore.size : null,
+    // Of the stores that sold last period, how many sold again this period.
+    retention: compare ? { base: sellingBefore.size, kept: [...sellingBefore].filter((id) => sellingNow.has(id)).length } : null,
+    activation: activation(start, end),
+    activationBefore: compare ? activation(prevStart, prevEnd) : null,
+  };
+  const journey = {
+    all: funnel(journeyStores),
+    cohort: funnel(journeyStores.filter((store) => inWindow(new Date(store.createdAt)))),
+    noProductsCount: noProducts.length,
+    noOrdersCount: noOrders.length,
+    noProducts: noProducts.slice(0, 20).map(card),
+    noOrders: noOrders.slice(0, 20).map(card),
+  };
+
   return toPlain({
     generatedAt: now,
+    journey,
+    outcomes,
     range: { from, to, interval, compare, prevFrom: istDate(prevStart), prevTo: istDate(prevEnd) },
     current: totals("current"),
     previous: compare ? totals("previous") : null,
@@ -647,6 +771,14 @@ async function loadIntel(query: Omit<SmolIntelQuery, "fresh">) {
       pastDue: subscribers.filter((s) => s.status === "past_due").length,
       cancelling: subscribers.filter((s) => s.cancelAtPeriodEnd).length,
       mrr: Math.round(mrr),
+      committedMrr: subs.committedMrr,
+      atRiskMrr: subs.atRiskMrr,
+      period: subs.period(start, end),
+      previousPeriod: compare ? subs.period(prevStart, prevEnd) : null,
+      // Recent: everything but renewals; renewals get their own history list.
+      recent: periodActivity.filter((row) => row.kind !== "renewed" && row.kind !== "renewal_failed").slice(0, 50),
+      renewals: periodActivity.filter((row) => row.kind === "renewed" || row.kind === "renewal_failed").slice(0, 50),
+      dueSoon: subs.dueSoon,
       plans: ((st?.plans ?? []) as Doc[]).map((row) => ({ plan: String(row._id), count: num(row.count) })),
       list: subscribers,
     },

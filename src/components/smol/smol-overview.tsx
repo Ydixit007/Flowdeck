@@ -4,36 +4,19 @@ import * as React from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import dynamic from "next/dynamic";
-import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  BadgeIndianRupee,
-  Coins,
-  CreditCard,
-  Crown,
-  Gift,
-  RefreshCw,
-  Repeat,
-  ShoppingBag,
-  ShoppingCart,
-  Store,
-  TrendingUp,
-  UserPlus,
-  Users,
-  Wallet,
-} from "lucide-react";
+import { CheckCircle2, ChevronRight, RefreshCw, Store } from "lucide-react";
 import { qs } from "@/lib/client/api";
 import { cn } from "@/lib/utils";
-import { SMOL_LOW_BALANCE, SMOL_ORDER_STATUSES, SMOL_PLAN_ORDER, getPath, periodRange } from "@/lib/smol-config";
+import { SMOL_ORDER_STATUSES, SMOL_PLAN_ORDER, periodRange } from "@/lib/smol-config";
 import type { SmolIntel } from "@/server/smol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SubscriptionActivity } from "@/components/smol/subscription-activity";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import {
   BarList,
   Delta,
-  Kpi,
   Panel,
   PeriodPicker,
   Select,
@@ -49,23 +32,7 @@ import {
   useUrlState,
 } from "@/components/smol/smol-ui";
 
-const METRICS = [
-  { key: "gmv", label: "GMV", format: money },
-  { key: "orders", label: "Orders", format: num },
-  { key: "creditsUsed", label: "Credits used", format: num },
-  { key: "billingRevenue", label: "Billing ₹", format: money },
-  { key: "newSellers", label: "New sellers", format: num },
-] as const;
-type Metric = (typeof METRICS)[number]["key"];
-
-type SellerRow = SmolIntel["sellers"][number];
-const SELLER_SORTS: { key: keyof SellerRow; label: string; numeric?: boolean }[] = [
-  { key: "gmv", label: "GMV", numeric: true },
-  { key: "orders", label: "Orders", numeric: true },
-  { key: "creditsUsed", label: "Credits used", numeric: true },
-  { key: "balance", label: "Balance", numeric: true },
-  { key: "lastOrderAt", label: "Last order" },
-];
+const TOP_SELLERS = 8;
 
 const TrendChart = dynamic(() => import("@/components/smol/trend-chart"), {
   ssr: false,
@@ -78,11 +45,12 @@ export function SmolOverview() {
   const period = url.get("period") || "30d";
   const range = periodRange(period, { from: url.get("from"), to: url.get("to") });
   const interval = url.get("interval") || "auto";
-  const [metric, setMetric] = React.useState<Metric>("gmv");
-  const [sellerSort, setSellerSort] = React.useState<{ key: keyof SellerRow; dir: 1 | -1 }>({ key: "gmv", dir: -1 });
+  const [cohort, setCohort] = React.useState(true);
+  const [stuck, setStuck] = React.useState<"noProducts" | "noOrders" | null>(null);
+  const [activity, setActivity] = React.useState("orders");
+  const [breakdown, setBreakdown] = React.useState("status");
 
   const { data, error, loading, reload } = useSmolFetch<SmolIntel>(`/api/smol/intel${qs({ from: range.from, to: range.to, interval })}`);
-  const loadedAt = data ? new Date(data.generatedAt) : null;
 
   // Drill-downs carry the same window into the list views.
   const periodParams = period === "all" ? {} : { period, from: url.get("from"), to: url.get("to") };
@@ -93,42 +61,19 @@ export function SmolOverview() {
 
   const c = data?.current;
   const p = data?.previous;
-  const sellers = [...(data?.sellers ?? [])].sort((a, b) => {
-    const x = a[sellerSort.key] ?? "";
-    const y = b[sellerSort.key] ?? "";
-    return (x < y ? -1 : x > y ? 1 : 0) * sellerSort.dir;
-  });
-  const top = data?.sellers[0];
-  const activeMetric = METRICS.find((m) => m.key === metric)!;
-  const creditLeft = data ? data.credits.free + data.credits.plan + data.credits.pack : 0;
-  const attentionCount = data
-    ? data.attention.lowBalanceCount +
-      (data.attention.pendingVerification ? 1 : 0) +
-      (data.attention.pendingReviews ? 1 : 0) +
-      (data.attention.pendingBilling.count ? 1 : 0) +
-      data.subscriptions.pastDue
-    : 0;
+  const sub = data?.subscriptions;
+  const out = data?.outcomes;
+  const rate = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : null);
 
   return (
-    <div className="mx-auto w-full max-w-[1500px] space-y-5 p-3 sm:p-5">
-      {/* Header + period controls */}
+    <div className="mx-auto w-full max-w-[1400px] space-y-4 p-3 sm:p-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">Platform overview</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Overview</h2>
           <p className="text-[12px] text-muted-foreground">
-            {data ? (
-              <>
-                {fmtDate(`${data.range.from}T00:00:00`, "d MMM yyyy")} – {fmtDate(`${data.range.to}T00:00:00`, "d MMM yyyy")}
-                {data.range.compare ? (
-                  <>
-                    {" "}
-                    · vs {fmtDate(`${data.range.prevFrom}T00:00:00`, "d MMM")} – {fmtDate(`${data.range.prevTo}T00:00:00`, "d MMM")}
-                  </>
-                ) : null}
-              </>
-            ) : (
-              "Loading…"
-            )}
+            {data
+              ? `${fmtDate(`${data.range.from}T00:00:00`, "d MMM")} – ${fmtDate(`${data.range.to}T00:00:00`, "d MMM yyyy")}${data.range.compare ? " · vs previous period" : ""}`
+              : "Loading…"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -138,524 +83,404 @@ export function SmolOverview() {
             to={url.get("to")}
             onChange={(next) => url.set({ period: next.period === "30d" ? null : next.period, from: next.from ?? null, to: next.to ?? null })}
           />
-          <Select
-            value={interval}
-            onChange={(event) => url.set({ interval: event.target.value === "auto" ? null : event.target.value })}
-            aria-label="Group chart by"
-          >
-            <option value="auto">Auto</option>
-            <option value="day">Daily</option>
-            <option value="week">Weekly</option>
-            <option value="month">Monthly</option>
-          </Select>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={reload}
-            aria-label="Refresh"
-            title={loadedAt ? `Updated ${formatDistanceToNow(loadedAt, { addSuffix: true })}` : "Refresh"}
-          >
+          <Button variant="outline" size="icon-sm" onClick={reload} aria-label="Refresh" title="Refresh">
             <RefreshCw className={cn(loading && "animate-spin")} />
           </Button>
         </div>
       </div>
 
-      {!data || !c ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {Array.from({ length: 12 }, (_, index) => (
-            <Skeleton key={index} className="h-[92px]" />
+      {!data || !c || !sub || !out ? (
+        <div className="grid gap-4 xl:grid-cols-12">
+          <Skeleton className="h-64 xl:col-span-12" />
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className="h-36 xl:col-span-3" />
           ))}
         </div>
       ) : (
-        <div className={cn("space-y-5 transition-opacity", loading && "opacity-60")}>
-          {/* KPIs */}
-          <KpiGroup title="Commerce">
-            <Kpi
-              icon={<TrendingUp />}
-              label="Paid GMV"
-              value={money(c.gmv)}
-              delta={<Delta current={c.gmv} previous={p?.gmv} />}
-              hint={`${num(c.paidOrders)} paid orders · AOV ${money(c.paidOrders ? c.gmv / c.paidOrders : 0)}`}
-            />
-            <Kpi
-              icon={<ShoppingBag />}
-              label="Orders placed"
-              value={num(c.orders)}
-              delta={<Delta current={c.orders} previous={p?.orders} />}
-              hint={`${pct(c.paidOrders, c.orders)} paid · ${pct(c.codOrders, c.orders)} COD`}
-              href={listHref("orders")}
-            />
-            <Kpi
-              icon={<ShoppingCart />}
-              label="Abandoned carts"
-              value={num(c.abandoned)}
-              delta={<Delta current={c.abandoned} previous={p?.abandoned} invert />}
-              hint={`${pct(c.abandoned, c.orders + c.abandoned)} of checkouts expired unpaid`}
-              tone={c.abandoned > c.orders ? "warning" : undefined}
-              href={listHref("orders", { f: "status:abandoned" })}
-            />
-            <Kpi
-              icon={<Store />}
-              label="Active sellers"
-              value={num(c.activeSellers)}
-              delta={<Delta current={c.activeSellers} previous={p?.activeSellers} />}
-              hint={`of ${num(data.totalSellers)} sellers · ${num(c.newSellers)} joined`}
-              href={listHref("stores", {}, false)}
-            />
-            <Kpi
-              icon={<UserPlus />}
-              label="New customers"
-              value={num(c.newCustomers)}
-              delta={<Delta current={c.newCustomers} previous={p?.newCustomers} />}
-              href={listHref("customers")}
-            />
-          </KpiGroup>
-
-          <KpiGroup title="Platform revenue">
-            <Kpi
-              icon={<BadgeIndianRupee />}
-              label="Billing revenue"
-              value={money(c.billingRevenue)}
-              delta={<Delta current={c.billingRevenue} previous={p?.billingRevenue} />}
-              hint={`Packs ${money(c.packRevenue)} · Plans ${money(c.subscriptionRevenue)}`}
-              href={listHref("billingorders", { f: "status:paid" })}
-            />
-            <Kpi
-              icon={<Repeat />}
-              label="MRR"
-              value={money(data.subscriptions.mrr)}
-              hint={`ARR ${moneyShort(data.subscriptions.mrr * 12)} · right now`}
-            />
-            <Kpi
-              icon={<CreditCard />}
-              label="Paid subscribers"
-              value={num(data.subscriptions.paid)}
-              hint={
-                [
-                  data.subscriptions.comped ? `${data.subscriptions.comped} comped (no billing)` : null,
-                  data.subscriptions.pastDue ? `${data.subscriptions.pastDue} past due` : null,
-                  data.subscriptions.cancelling ? `${data.subscriptions.cancelling} cancelling` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "Gateway-billed plans"
-              }
-            />
-            <Kpi
-              icon={<Coins />}
-              label="Credits bought"
-              value={num(c.creditsBought)}
-              delta={<Delta current={c.creditsBought} previous={p?.creditsBought} />}
-              hint={`${num(c.purchases)} paid purchases`}
-            />
-          </KpiGroup>
-
-          <KpiGroup title="Credits">
-            <Kpi
-              icon={<Wallet />}
-              label="Credits consumed"
-              value={num(c.creditsUsed)}
-              delta={<Delta current={c.creditsUsed} previous={p?.creditsUsed} />}
-              hint={`${num(c.creditsGranted)} granted in period`}
-              href={listHref("credittransactions", { f: "type:charge" })}
-            />
-            <Kpi
-              icon={<Gift />}
-              label="Free credits left"
-              value={num(data.credits.free)}
-              hint={`${pct(data.credits.free, creditLeft)} of live lots · signup + manual`}
-            />
-            <Kpi
-              icon={<Coins />}
-              label="Paid credits left"
-              value={num(data.credits.plan + data.credits.pack)}
-              hint={`Plan ${num(data.credits.plan)} · Pack ${num(data.credits.pack)} · ${num(data.credits.expiring7d)} expire ≤7d`}
-            />
-            <Kpi
-              icon={<Users />}
-              label="Balance outstanding"
-              value={num(data.credits.outstanding)}
-              hint={
-                data.credits.outstanding !== creditLeft
-                  ? `Lots hold ${num(creditLeft)}; the difference is manual balance edits`
-                  : "Sum of seller balances"
-              }
-            />
-          </KpiGroup>
-
-          {/* Trend + top seller */}
-          <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-            <Panel
-              title="Trend"
-              description={`${activeMetric.label} per ${data.range.interval} · total ${activeMetric.format(
-                data.series.reduce((sum, point) => sum + point[metric], 0),
-              )}`}
-              actions={
-                <div role="group" aria-label="Metric" className="flex flex-wrap items-center rounded-lg border border-border bg-surface-sunken p-0.5">
-                  {METRICS.map((m) => (
-                    <button
-                      key={m.key}
-                      type="button"
-                      aria-pressed={metric === m.key}
-                      onClick={() => setMetric(m.key)}
-                      className={cn(
-                        "h-6 rounded-md px-2 text-[11px] font-medium transition-colors",
-                        metric === m.key ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-              }
-            >
-              <div className="h-64 px-2 pb-2 pt-4">
-                <TrendChart
-                  data={data.series}
-                  dataKey={metric}
-                  interval={data.range.interval}
-                  label={activeMetric.label}
-                  format={activeMetric.format}
-                  axisFormat={metric === "gmv" || metric === "billingRevenue" ? moneyShort : num}
-                />
-              </div>
-            </Panel>
-
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-              <Panel title="Top store" description="Highest paid GMV in period">
-                {top && top.gmv > 0 ? (
-                  <Link href={sellerHref(String(top.storeId))} className="block space-y-3 p-4 hover:bg-muted/40">
-                    <div className="flex items-center gap-3">
-                      <span className="flex size-10 items-center justify-center rounded-lg bg-primary/12 text-primary">
-                        <Crown className="size-5" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate text-[15px] font-semibold">{top.name}</p>
-                        <p className="truncate text-[12px] text-muted-foreground">{top.domain}</p>
-                      </div>
-                      <Badge variant={badgeVariant(top.plan)} className="ml-auto">
-                        {top.plan}
-                      </Badge>
-                    </div>
-                    <dl className="grid grid-cols-3 gap-2 text-center">
-                      <MiniStat label="GMV" value={moneyShort(top.gmv)} />
-                      <MiniStat label="Orders" value={num(top.orders)} />
-                      <MiniStat label="Share" value={pct(top.gmv, c.gmv)} />
-                    </dl>
-                  </Link>
-                ) : (
-                  <p className="px-4 py-8 text-center text-[12px] text-muted-foreground">No paid orders in this period</p>
-                )}
-              </Panel>
-
-              <Panel
-                title="Needs attention"
-                actions={attentionCount ? <Badge variant="warning">{attentionCount}</Badge> : <Badge variant="success">all clear</Badge>}
-              >
-                <ul className="divide-y divide-border text-[13px]">
-                  {data.attention.pendingVerification ? (
-                    <AttentionRow
-                      href={listHref("orders", { f: ["status:pending", "paymentStatus:pending", "paymentInfo.method:upi_manual"] }, false)}
-                      label="UPI payments awaiting verification"
-                      value={num(data.attention.pendingVerification)}
-                    />
-                  ) : null}
-                  {data.attention.pendingReviews ? (
-                    <AttentionRow href={listHref("reviews", { f: "status:pending" }, false)} label="Reviews pending" value={num(data.attention.pendingReviews)} />
-                  ) : null}
-                  {data.attention.pendingBilling.count ? (
-                    <AttentionRow
-                      href={listHref("billingorders", { f: "status:pending" }, false)}
-                      label="Unfinished billing checkouts"
-                      value={`${data.attention.pendingBilling.count} · ${money(data.attention.pendingBilling.amount)}`}
-                    />
-                  ) : null}
-                  {data.subscriptions.list
-                    .filter((s) => s.status === "past_due")
-                    .map((s) => (
-                      <AttentionRow key={String(s.storeId)} href={sellerHref(String(s.storeId))} label={`${s.name} · subscription past due`} value={s.plan} />
-                    ))}
-                  {data.attention.lowBalance.slice(0, 5).map((s) => (
-                    <AttentionRow
-                      key={String(s.storeId)}
-                      href={sellerHref(String(s.storeId))}
-                      label={`${s.name} · low credits`}
-                      value={num(s.balance)}
-                      danger={s.balance <= 0}
-                    />
-                  ))}
-                  {data.attention.lowBalanceCount > 5 ? (
-                    <AttentionRow
-                      href="/smol/stores?sort=credits.balance&dir=asc"
-                      label={`${num(data.attention.lowBalanceCount - 5)} more sellers low on credits`}
-                      value="View"
-                    />
-                  ) : null}
-                  {attentionCount === 0 ? <li className="px-4 py-6 text-center text-[12px] text-muted-foreground">Nothing needs you right now</li> : null}
-                </ul>
-              </Panel>
-            </div>
-          </div>
-
-          {/* Seller leaderboard */}
-          <Panel
-            title="Sellers"
-            description={`${data.totalSellers > data.sellers.length ? `Top ${data.sellers.length} by GMV` : "Performance"} in the selected period · click a column to sort`}
-            actions={
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/smol/stores">All sellers</Link>
-              </Button>
+        <div className={cn("grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-12", loading && "opacity-60")}>
+          {/* North star: stores that actually sell */}
+          <Bento
+            className="sm:col-span-2 xl:col-span-12"
+            title="Stores that made a sale"
+            action={
+              <Select value={interval} onChange={(event) => url.set({ interval: event.target.value === "auto" ? null : event.target.value })} aria-label="Group chart by">
+                <option value="auto">Auto</option>
+                <option value="day">Daily</option>
+                <option value="week">Weekly</option>
+                <option value="month">Monthly</option>
+              </Select>
             }
           >
-            <div className="fd-scroll-thin overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead className="text-left text-[12px] text-muted-foreground">
-                  <tr className="border-b border-border bg-surface-sunken/60">
-                    <th className="px-4 py-2 font-medium">Seller</th>
-                    <th className="px-3 py-2 font-medium">Plan</th>
-                    {SELLER_SORTS.map((col) => {
-                      const active = sellerSort.key === col.key;
-                      return (
-                        <th
-                          key={col.key}
-                          className={cn("px-3 py-2 font-medium", col.numeric && "text-right")}
-                          aria-sort={active ? (sellerSort.dir === 1 ? "ascending" : "descending") : undefined}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setSellerSort({ key: col.key, dir: active ? (sellerSort.dir === 1 ? -1 : 1) : -1 })}
-                            className={cn("inline-flex items-center gap-1 whitespace-nowrap hover:text-foreground", active && "text-foreground")}
-                          >
-                            {col.label}
-                            {active ? sellerSort.dir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" /> : null}
-                          </button>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {sellers.map((s, index) => (
-                    <tr key={String(s.storeId)} className="hover:bg-muted/50">
-                      <td className="px-4 py-2">
-                        <Link href={sellerHref(String(s.storeId))} className="flex items-center gap-2.5">
-                          <span className="w-4 text-right text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium hover:text-primary">{s.name}</span>
-                            <span className="block truncate text-[11px] text-muted-foreground">
-                              joined {fmtDate(s.joinedAt, "d MMM yy")}
-                            </span>
-                          </span>
-                        </Link>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge variant={badgeVariant(s.plan)}>{s.plan}</Badge>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{money(s.gmv)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        <Link href={listHref("orders", { storeId: String(s.storeId) })} className="hover:text-primary hover:underline">
-                          {num(s.orders)}
-                        </Link>
-                        <span className="text-muted-foreground"> / {num(s.paidOrders)} paid</span>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{num(s.creditsUsed)}</td>
-                      <td className={cn("px-3 py-2 text-right tabular-nums", s.balance <= SMOL_LOW_BALANCE && "font-medium text-warning", s.balance <= 0 && "text-destructive")}>
-                        {num(s.balance)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {s.lastOrderAt ? formatDistanceToNow(new Date(s.lastOrderAt), { addSuffix: true }) : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-
-          {/* Breakdowns */}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <Panel title="Plans" description="Sellers per plan, right now">
-              <BarList
-                rows={[...data.subscriptions.plans]
-                  .sort((a, b) => SMOL_PLAN_ORDER.indexOf(a.plan) - SMOL_PLAN_ORDER.indexOf(b.plan))
-                  .map((row) => ({
-                    key: row.plan,
-                    label: <Badge variant={badgeVariant(row.plan)}>{row.plan}</Badge>,
-                    value: row.count,
-                    href: listHref("stores", { f: `credits.plan:${row.plan}` }, false),
-                  }))}
-              />
-            </Panel>
-            <Panel title="Credit lots" description={`${num(creditLeft)} live credits by source`}>
-              <div className="space-y-3 p-4">
-                <div className="flex h-3 overflow-hidden rounded-full bg-muted">
-                  {(["free", "plan", "pack"] as const).map((key, i) => (
-                    <span
-                      key={key}
-                      className={cn("h-full", ["bg-primary/40", "bg-primary", "bg-warning"][i])}
-                      style={{ width: pct(data.credits[key], creditLeft).replace("—", "0%") }}
-                    />
-                  ))}
+            <div className="grid gap-4 px-4 pb-4 md:grid-cols-[200px_minmax(0,1fr)]">
+              <div className="flex flex-col justify-center gap-2">
+                <p className="flex items-baseline gap-2">
+                  <Big>{num(out.sellingStores)}</Big>
+                  <span className="text-[13px] text-muted-foreground">of {num(data.totalSellers)} stores</span>
+                </p>
+                <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                  <Delta current={out.sellingStores} previous={out.sellingStoresBefore} />
+                  {pct(out.sellingStores, data.totalSellers)} of live stores
                 </div>
-                <ul className="space-y-1.5 text-[13px]">
-                  {([
-                    ["free", "Free (signup / manual)", "bg-primary/40"],
-                    ["plan", "Plan (expires each cycle)", "bg-primary"],
-                    ["pack", "Packs (never expire)", "bg-warning"],
-                  ] as const).map(([key, label, color]) => (
-                    <li key={key} className="flex items-center gap-2">
-                      <span className={cn("size-2.5 rounded-sm", color)} />
-                      <span className="flex-1 text-muted-foreground">{label}</span>
-                      <span className="tabular-nums">{num(data.credits[key])}</span>
-                    </li>
-                  ))}
-                </ul>
               </div>
-            </Panel>
-            <Panel title="Credit usage" description="Consumed in period, by action">
-              <BarList rows={data.usageByAction.map((row) => ({ key: row.action, label: row.action.replaceAll("_", " "), value: row.credits }))} />
-            </Panel>
-            <Panel title="Orders by status" description="Placed in period">
+              <div className="h-48 min-w-0">
+                <TrendChart data={data.series} dataKey="sellingStores" interval={data.range.interval} label="Stores that sold" format={num} axisFormat={num} bars />
+              </div>
+            </div>
+          </Bento>
+
+          {/* What drives it */}
+          <Bento className="xl:col-span-3" title="Activation" action={<PointsChange now={rate(out.activation.sold, out.activation.joined)} before={out.activationBefore ? rate(out.activationBefore.sold, out.activationBefore.joined) : null} />}>
+            <Metric
+              value={pctText(rate(out.activation.sold, out.activation.joined))}
+              bar={rate(out.activation.sold, out.activation.joined)}
+              caption={`${num(out.activation.sold)} of ${num(out.activation.joined)} new sellers sold${out.activation.medianDays !== null ? ` · ~${out.activation.medianDays}d to first sale` : ""}`}
+            />
+          </Bento>
+          <Bento className="xl:col-span-3" title="Seller retention">
+            <Metric
+              value={pctText(out.retention ? rate(out.retention.kept, out.retention.base) : null)}
+              bar={out.retention ? rate(out.retention.kept, out.retention.base) : null}
+              caption={out.retention ? `${num(out.retention.kept)} of ${num(out.retention.base)} kept selling` : "Pick a period to compare"}
+            />
+          </Bento>
+          <Bento className="xl:col-span-3" title="Recurring revenue" action={<MoneyChange value={sub.period.netMrrChange} />}>
+            <Metric value={money(sub.committedMrr)} unit="/mo" caption={`${num(sub.paid)} paying · ${num(sub.period.new)} new · ${num(sub.period.churned)} churned`} />
+          </Bento>
+          <Bento className="xl:col-span-3" title="Sales in stores" action={<Delta current={c.gmv} previous={p?.gmv} />}>
+            <Metric value={money(c.gmv)} caption={`${num(c.paidOrders)} orders · avg ${money(c.paidOrders ? c.gmv / c.paidOrders : 0)}`} />
+          </Bento>
+
+          {/* Where the funnel leaks, and what needs a human */}
+          <Bento
+            className="sm:col-span-2 xl:col-span-8 xl:h-[260px]"
+            title="Seller journey"
+            action={<Segmented value={cohort ? "cohort" : "all"} onChange={(v) => setCohort(v === "cohort")} options={[["cohort", "Joined in period"], ["all", "All"]]} />}
+          >
+            <JourneySteps
+              steps={cohort ? data.journey.cohort : data.journey.all}
+              stuck={[
+                null,
+                data.journey.noProductsCount ? { label: `${num(data.journey.noProductsCount)} stuck`, open: () => setStuck("noProducts") } : null,
+                data.journey.noOrdersCount ? { label: `${num(data.journey.noOrdersCount)} stuck`, open: () => setStuck("noOrders") } : null,
+                null,
+              ]}
+            />
+          </Bento>
+          <Bento className="sm:col-span-2 xl:col-span-4 xl:h-[260px]" title="To do" action={<CountPill n={todo(data, listHref).length} />}>
+            <TodoList items={todo(data, listHref)} />
+          </Bento>
+
+          {/* Who and what */}
+          <Bento
+            className="xl:col-span-4 xl:h-[380px]"
+            title="Top sellers"
+            action={
+              <Link href="/smol/stores" className="text-[12px] text-muted-foreground hover:text-foreground">
+                View all
+              </Link>
+            }
+          >
+            <ul className="text-[13px]">
+              {data.sellers.slice(0, TOP_SELLERS).map((s, index) => (
+                <li key={String(s.storeId)}>
+                  <Link href={sellerHref(String(s.storeId))} className="flex items-center gap-3 px-4 py-2 hover:bg-muted/50">
+                    <span className="w-3 text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{s.name}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {num(s.orders)} orders · {s.plan}
+                      </span>
+                    </span>
+                    <span className="text-right font-medium tabular-nums">{money(s.gmv)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Bento>
+          <Bento
+            className="xl:col-span-4 xl:h-[380px]"
+            title="Activity"
+            action={
+              <Select value={activity} onChange={(event) => setActivity(event.target.value)} aria-label="Activity">
+                <option value="orders">Orders</option>
+                <option value="sellers">New sellers</option>
+                <option value="subs">Plan changes</option>
+                <option value="renewals">Renewals</option>
+              </Select>
+            }
+          >
+            {activity === "orders" ? (
+              <OrderList orders={data.recentOrders as Record<string, unknown>[]} />
+            ) : activity === "sellers" ? (
+              <SellerList rows={data.recentSellers} />
+            ) : (
+              <SubscriptionActivity compact rows={activity === "subs" ? sub.recent : sub.renewals} empty={activity === "subs" ? "No plan changes" : "No renewals"} />
+            )}
+          </Bento>
+          <Bento
+            className="sm:col-span-2 xl:col-span-4 xl:h-[380px]"
+            title="Breakdown"
+            action={
+              <Select value={breakdown} onChange={(event) => setBreakdown(event.target.value)} aria-label="Breakdown">
+                <option value="status">Order status</option>
+                <option value="method">Payment method</option>
+                <option value="products">Top products</option>
+                <option value="plans">Plans</option>
+                <option value="usage">Credit usage</option>
+                <option value="lots">Credits left</option>
+              </Select>
+            }
+          >
+            {breakdown === "status" ? (
               <BarList
-                rows={[
-                  ...SMOL_ORDER_STATUSES,
-                  ...data.byStatus.map((row) => row.status).filter((status) => !SMOL_ORDER_STATUSES.includes(status)),
-                ].map((status) => ({
+                rows={[...SMOL_ORDER_STATUSES, ...data.byStatus.map((row) => row.status).filter((status) => !SMOL_ORDER_STATUSES.includes(status))].map((status) => ({
                   key: status,
-                  label: <Badge variant={badgeVariant(status)}>{status}</Badge>,
+                  label: <span className="capitalize">{status}</span>,
                   value: data.byStatus.find((row) => row.status === status)?.count ?? 0,
                   href: listHref("orders", { f: `status:${status}` }),
                 }))}
               />
-            </Panel>
-            <Panel title="Payment methods" description="Orders in period · paid GMV">
-              <BarList
-                format={(value) => num(value)}
-                rows={data.byMethod.map((row) => ({
-                  key: row.method,
-                  label: (
-                    <span>
-                      {row.method.replaceAll("_", " ")} <span className="text-muted-foreground">· {money(row.gmv)}</span>
-                    </span>
-                  ),
-                  value: row.count,
-                  href: listHref("orders", { f: `paymentInfo.method:${row.method}` }),
-                }))}
-              />
-            </Panel>
-            <Panel title="Top products" description="By paid revenue in period">
+            ) : breakdown === "method" ? (
+              <BarList rows={data.byMethod.map((row) => ({ key: row.method, label: row.method.replaceAll("_", " "), value: row.count, href: listHref("orders", { f: `paymentInfo.method:${row.method}` }) }))} />
+            ) : breakdown === "products" ? (
               <BarList
                 format={money}
                 rows={data.topProducts.map((row) => ({
                   key: String(row.productId),
                   label: (
                     <span>
-                      {String(row.name)} <span className="text-muted-foreground">· {storeName(String(row.storeId))} · ×{num(row.quantity)}</span>
+                      {String(row.name)} <span className="text-muted-foreground">· {storeName(String(row.storeId))}</span>
                     </span>
                   ),
                   value: Number(row.revenue),
                 }))}
               />
-            </Panel>
-          </div>
+            ) : breakdown === "plans" ? (
+              <BarList
+                rows={[...sub.plans]
+                  .sort((a, b) => SMOL_PLAN_ORDER.indexOf(a.plan) - SMOL_PLAN_ORDER.indexOf(b.plan))
+                  .map((row) => ({ key: row.plan, label: <span className="capitalize">{row.plan}</span>, value: row.count, href: listHref("stores", { f: `credits.plan:${row.plan}` }, false) }))}
+              />
+            ) : breakdown === "usage" ? (
+              <BarList rows={data.usageByAction.map((row) => ({ key: row.action, label: row.action.replaceAll("_", " "), value: row.credits }))} />
+            ) : (
+              <BarList
+                empty="No live credits"
+                rows={([
+                  ["free", "Free"],
+                  ["plan", "Plan"],
+                  ["pack", "Packs"],
+                ] as const).map(([key, label]) => ({ key, label, value: data.credits[key] }))}
+              />
+            )}
+          </Bento>
 
-          {/* Activity */}
-          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-            <Panel
-              title="Latest orders"
-              actions={
-                <Button asChild variant="ghost" size="sm">
-                  <Link href="/smol/orders">All orders</Link>
-                </Button>
-              }
-            >
-              <OrderList orders={data.recentOrders as Record<string, unknown>[]} />
-            </Panel>
-            <Panel
-              title="Newest sellers"
-              actions={
-                <Button asChild variant="ghost" size="sm">
-                  <Link href="/smol/stores">All sellers</Link>
-                </Button>
-              }
-            >
-              <ul className="divide-y divide-border">
-                {data.recentSellers.map((s) => (
-                  <li key={String(s.storeId)}>
-                    <Link href={sellerHref(String(s.storeId))} className="flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-muted/50">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{s.name}</span>
-                        <span className="block truncate text-[12px] text-muted-foreground">{s.domain}</span>
-                      </span>
-                      <Badge variant={badgeVariant(s.plan)}>{s.plan}</Badge>
-                      <span className="w-20 text-right text-[12px] text-muted-foreground">
-                        {s.joinedAt ? formatDistanceToNow(new Date(s.joinedAt), { addSuffix: true }) : "—"}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </Panel>
-          </div>
+          <Dialog open={!!stuck} onOpenChange={(open) => !open && setStuck(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{stuck === "noProducts" ? "No products yet" : "Products, no sale yet"}</DialogTitle>
+                <DialogDescription>Joined more than 3 days ago, newest first.</DialogDescription>
+              </DialogHeader>
+              <div className="fd-scroll-thin max-h-[60vh] overflow-y-auto">
+                <SellerList rows={stuck ? data.journey[stuck] : []} />
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
     </div>
   );
 }
 
-function KpiGroup({ title, children }: { title: string; children: React.ReactNode }) {
+/** One card style for the whole page: title row, then content that scrolls inside a fixed-height tile. */
+function Bento({ title, action, className, children }: { title: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
   return (
-    <section>
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:[&:has(>:nth-child(5))]:grid-cols-5">{children}</div>
+    <section className={cn("fd-panel flex min-w-0 flex-col overflow-hidden", className)}>
+      <header className="flex h-12 shrink-0 items-center gap-2 px-4">
+        <h3 className="min-w-0 flex-1 truncate text-[13px] font-medium">{title}</h3>
+        {action}
+      </header>
+      <div className="fd-scroll-thin min-h-0 flex-1 overflow-y-auto">{children}</div>
     </section>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+const Big = ({ children }: { children: React.ReactNode }) => <span className="text-[32px] font-semibold leading-none tracking-tight tabular-nums">{children}</span>;
+const pctText = (value: number | null) => (value === null ? "—" : `${value}%`);
+
+function Metric({ value, unit, bar, caption }: { value: string; unit?: string; bar?: number | null; caption: string }) {
   return (
-    <div className="rounded-md bg-surface-sunken px-2 py-1.5">
-      <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="text-[14px] font-semibold tabular-nums">{value}</dd>
+    <div className="flex h-full flex-col gap-3 px-4 pb-4">
+      <p className="flex items-baseline gap-1.5">
+        <Big>{value}</Big>
+        {unit ? <span className="text-[12px] text-muted-foreground">{unit}</span> : null}
+      </p>
+      {bar !== undefined ? (
+        <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+          <div className="h-full rounded-full bg-primary" style={{ width: `${bar ?? 0}%` }} />
+        </div>
+      ) : null}
+      <p className="mt-auto truncate text-[12px] text-muted-foreground">{caption}</p>
     </div>
   );
 }
 
-function AttentionRow({ href, label, value, danger }: { href: string; label: string; value: string; danger?: boolean }) {
+function Chip({ text, good }: { text: string; good: boolean | null }) {
   return (
-    <li>
-      <Link href={href} className="flex items-center gap-2 px-4 py-2 hover:bg-muted/50">
-        <AlertTriangle className={cn("size-3.5 shrink-0", danger ? "text-destructive" : "text-warning")} />
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span className="tabular-nums text-muted-foreground">{value}</span>
-      </Link>
-    </li>
+    <span className={cn("rounded px-1 py-px text-[11px] font-medium tabular-nums", good === null ? "text-muted-foreground" : good ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
+      {text}
+    </span>
   );
 }
 
+function PointsChange({ now, before }: { now: number | null; before: number | null }) {
+  if (now === null || before === null) return null;
+  const diff = now - before;
+  return <Chip text={diff === 0 ? "no change" : `${diff > 0 ? "+" : ""}${diff} pts`} good={diff === 0 ? null : diff > 0} />;
+}
+
+function MoneyChange({ value }: { value: number }) {
+  return <Chip text={value === 0 ? "no change" : `${value > 0 ? "+" : "−"}${moneyShort(Math.abs(value))}`} good={value === 0 ? null : value > 0} />;
+}
+
+function CountPill({ n }: { n: number }) {
+  return n ? <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-warning">{n}</span> : null;
+}
+
+const STEP_LABELS = ["Signed up", "Added products", "Made a sale", "Paid plan"];
+
+function JourneySteps({ steps, stuck }: { steps: number[]; stuck: ({ label: string; open: () => void } | null)[] }) {
+  const base = steps[0] || 1;
+  return (
+    <ol className="grid h-full grid-cols-2 gap-x-6 gap-y-5 px-4 pb-4 pt-2 md:grid-cols-4">
+      {steps.map((count, index) => {
+        const hint = stuck[index];
+        return (
+          <li key={index} className="flex flex-col gap-2">
+            <span className="text-[12px] text-muted-foreground">{STEP_LABELS[index]}</span>
+            <Big>{num(count)}</Big>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+              <div className="h-full rounded-full bg-primary" style={{ width: `${(count / base) * 100}%` }} />
+            </div>
+            <span className="flex items-center justify-between gap-2 text-[12px]">
+              <span className="tabular-nums text-muted-foreground">{index ? pct(count, base) : "100%"}</span>
+              {hint ? (
+                <button type="button" onClick={hint.open} className="inline-flex items-center gap-0.5 text-warning hover:underline">
+                  {hint.label} <ChevronRight className="size-3" />
+                </button>
+              ) : null}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function Segmented({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: [string, string][] }) {
+  return (
+    <div role="group" className="flex items-center rounded-lg border border-border bg-surface-sunken p-0.5">
+      {options.map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          aria-pressed={value === key}
+          onClick={() => onChange(key)}
+          className={cn("h-6 rounded-md px-2 text-[11px] font-medium transition-colors", value === key ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type TodoItem = { label: string; value: string; href: string; tone: "danger" | "warning" | "info" };
+
+function TodoList({ items }: { items: TodoItem[] }) {
+  if (items.length === 0)
+    return (
+      <p className="flex h-full items-center justify-center gap-1.5 text-[12px] text-muted-foreground">
+        <CheckCircle2 className="size-4 text-success" /> All clear
+      </p>
+    );
+  return (
+    <ul className="text-[13px]">
+      {items.map((item) => (
+        <li key={item.label}>
+          <Link href={item.href} className="flex items-center gap-3 px-4 py-2 hover:bg-muted/50">
+            <span className={cn("size-1.5 shrink-0 rounded-full", item.tone === "danger" ? "bg-destructive" : item.tone === "warning" ? "bg-warning" : "bg-primary")} />
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            <span className="font-medium tabular-nums">{item.value}</span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+type Card = SmolIntel["recentSellers"][number];
+
+function SellerList({ rows }: { rows: Card[] }) {
+  if (rows.length === 0) return <p className="px-4 py-6 text-center text-[12px] text-muted-foreground">No sellers</p>;
+  return (
+    <ul className="text-[13px]">
+      {rows.map((s) => (
+        <li key={String(s.storeId)}>
+          <Link href={sellerHref(String(s.storeId))} className="flex items-center gap-3 px-4 py-2 hover:bg-muted/50">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{s.name ?? s.domain}</span>
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {s.plan} · joined {s.joinedAt ? formatDistanceToNow(new Date(s.joinedAt), { addSuffix: true }) : "—"}
+              </span>
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Admin to-dos, most urgent first. */
+function todo(data: SmolIntel, listHref: (name: string, extra?: Record<string, string | string[]>, windowed?: boolean) => string): TodoItem[] {
+  const a = data.attention;
+  const items: TodoItem[] = [];
+  for (const s of data.subscriptions.list.filter((row) => row.status === "past_due")) {
+    items.push({ label: `${s.name ?? "Seller"} past due`, value: s.plan, href: sellerHref(String(s.storeId)), tone: "danger" });
+  }
+  if (a.pendingVerification)
+    items.push({
+      label: "UPI to verify",
+      value: num(a.pendingVerification),
+      href: listHref("orders", { f: ["status:pending", "paymentStatus:pending", "paymentInfo.method:upi_manual"] }, false),
+      tone: "warning",
+    });
+  if (a.lowBalanceCount) items.push({ label: "Low on credits", value: num(a.lowBalanceCount), href: "/smol/stores?sort=credits.balance&dir=asc", tone: "warning" });
+  if (a.pendingBilling.count) items.push({ label: "Unfinished checkouts", value: num(a.pendingBilling.count), href: listHref("billingorders", { f: "status:pending" }, false), tone: "info" });
+  if (a.pendingReviews) items.push({ label: "Reviews to approve", value: num(a.pendingReviews), href: listHref("reviews", { f: "status:pending" }, false), tone: "info" });
+  for (const r of data.subscriptions.dueSoon) {
+    items.push({ label: `${r.name ?? "Seller"} renews ${fmtDate(r.dueAt, "d MMM")}`, value: String(r.plan ?? ""), href: sellerHref(r.storeId), tone: "info" });
+  }
+  return items;
+}
+
+/** Latest orders, one line each: number, store and time, status, amount. */
 export function OrderList({ orders }: { orders: Record<string, unknown>[] }) {
   const { storeName, openRecord } = useSmol();
   if (orders.length === 0) return <p className="px-4 py-6 text-center text-[12px] text-muted-foreground">No orders yet</p>;
   return (
-    <ul className="divide-y divide-border">
+    <ul className="text-[13px]">
       {orders.map((order) => (
         <li key={String(order._id)}>
-          <button
-            type="button"
-            onClick={() => openRecord("orders", String(order._id))}
-            className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] hover:bg-muted/50"
-          >
+          <button type="button" onClick={() => openRecord("orders", String(order._id))} className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-muted/50">
             <span className="min-w-0 flex-1">
-              <span className="font-medium">{String(order.orderNumber ?? "")}</span>
-              <span className="block truncate text-[12px] text-muted-foreground">
-                {storeName(String(order.storeId))} · {String(getPath(order, "customerInfo.firstName") ?? "")}{" "}
-                {String(getPath(order, "customerInfo.lastName") ?? "")} · {fmtDate(order.createdAt, "d MMM, HH:mm")}
+              <span className="block truncate font-medium">{String(order.orderNumber ?? "")}</span>
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {storeName(String(order.storeId))} · {fmtDate(order.createdAt, "d MMM, HH:mm")}
               </span>
             </span>
-            <Badge variant={badgeVariant(String(order.paymentStatus))} className="hidden sm:inline-flex">
-              {String(order.paymentStatus)}
-            </Badge>
             <Badge variant={badgeVariant(String(order.status))}>{String(order.status)}</Badge>
-            <span className="w-16 text-right tabular-nums">{money(order.totalAmount)}</span>
+            <span className="w-16 text-right font-medium tabular-nums">{money(order.totalAmount)}</span>
           </button>
         </li>
       ))}

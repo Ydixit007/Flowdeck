@@ -214,8 +214,36 @@
     color: var(--foreground);
   }
 
-  .fd-scroll-thin {
-    scrollbar-width: thin;
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--muted-foreground) 35%, transparent) padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent) transparent;
+    }
+  }
+  .fd-no-scrollbar {
+    scrollbar-width: none;
+  }
+  .fd-no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
   /* Hairline grid lines used across every calendar view. */
   .fd-grid-line {

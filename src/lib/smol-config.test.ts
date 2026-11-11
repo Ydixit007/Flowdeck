@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bucketKeys, bucketOf, chartInterval, mediaRefs, periodRange, shiftDate, todayIST } from "./smol-config";
+import { MARKETING_STORE_FIELDS, SMOL_COLLECTIONS, bucketKeys, bucketOf, canReadCollection, chartInterval, mediaRefs, periodRange, shiftDate, todayIST, visibleCollection, type SmolCollectionName } from "./smol-config";
 
 test("bucketKeys covers every day, Monday-week and month in range", () => {
   assert.deepEqual(bucketKeys("2026-09-29", "2026-10-01", "day"), ["2026-09-29", "2026-09-30", "2026-10-01"]);
@@ -52,4 +52,17 @@ test("mediaRefs finds R2 URLs, bare proof keys and Firebase URLs anywhere in a d
     "r2:payment-proofs/17-aa.png",
     "r2:products/1700-abc.webp",
   ]);
+});
+
+test("marketing reads only the sellers list, and only contact fields of it", () => {
+  for (const name of Object.keys(SMOL_COLLECTIONS) as SmolCollectionName[]) {
+    assert.equal(canReadCollection("marketing", name), name === "stores", name);
+    assert.equal(canReadCollection("superadmin", name), true, name);
+  }
+  const stores = visibleCollection("stores", "marketing");
+  for (const key of [...stores.search, ...stores.filters.map((f) => f.key), ...stores.columns.map((c) => c.key)]) {
+    assert.ok(MARKETING_STORE_FIELDS.has(key), `${key} leaks to marketing`);
+  }
+  assert.ok(!stores.columns.some((c) => c.key === "credits.balance"));
+  assert.deepEqual(visibleCollection("stores", "superadmin"), SMOL_COLLECTIONS.stores);
 });

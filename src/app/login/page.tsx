@@ -40,15 +40,7 @@ function LoginForm() {
   return (
     <AuthShell
       title="Sign in"
-      subtitle="Pick up where your calendar left off."
-      footer={
-        <>
-          New here?{" "}
-          <Link href="/register" className="font-medium text-primary hover:underline">
-            Create an account
-          </Link>
-        </>
-      }
+      subtitle="SmolBusiness admin panel. Access is by invite from a superadmin."
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div className="space-y-1.5">

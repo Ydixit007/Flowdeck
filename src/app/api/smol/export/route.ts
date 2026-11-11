@@ -1,14 +1,14 @@
 import { z } from "zod";
 import { handleError, parseQuery } from "@/lib/api";
 import { csvChunks, jsonChunks, toStream, zip } from "@/lib/export-file";
-import { requireSmolAdmin } from "@/server/smol";
+import { requireAdmin } from "@/server/smol";
 import { smolExport } from "@/server/smol-export";
 
 export const maxDuration = 300;
 
 export async function GET(request: Request) {
   try {
-    await requireSmolAdmin();
+    await requireAdmin("superadmin");
     const { format } = parseQuery(request, z.object({ format: z.enum(["json", "csv"]).default("json") }));
     const { database, exportedAt, tables } = await smolExport();
     const base = `${database}-${exportedAt.slice(0, 19).replaceAll(":", "-")}`;

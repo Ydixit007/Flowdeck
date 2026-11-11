@@ -44,7 +44,7 @@ export const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-[8vh] z-50 w-[calc(100vw-2rem)] -translate-x-1/2 fd-panel fd-elevated p-0 overflow-hidden",
+        "fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 fd-panel fd-elevated p-0 overflow-y-auto",
         size === "sm" && "max-w-sm",
         size === "md" && "max-w-lg",
         size === "lg" && "max-w-2xl",

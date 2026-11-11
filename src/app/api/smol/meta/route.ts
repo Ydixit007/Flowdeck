@@ -1,10 +1,10 @@
 import { handleError, ok } from "@/lib/api";
-import { requireSmolAdmin, smolMeta } from "@/server/smol";
+import { requireAdmin, smolMeta } from "@/server/smol";
 
 export async function GET() {
   try {
-    await requireSmolAdmin();
-    return ok(await smolMeta());
+    const user = await requireAdmin();
+    return ok(await smolMeta(user.role));
   } catch (error) {
     return handleError(error);
   }

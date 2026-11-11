@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import { z } from "zod";
 import { NotFoundError } from "@/lib/auth";
 import { smolDb } from "@/lib/smol-db";
-import { SMOL_ANNOUNCEMENT_TYPES, mediaRefs, type SmolCollectionName } from "@/lib/smol-config";
+import { SMOL_ANNOUNCEMENT_TYPES, mediaRefs, normalizeTag, type SmolCollectionName } from "@/lib/smol-config";
 
 // The only SmolBusiness writes. Rules mirror smolBusiness-backend's mongoose models, which these bypass.
 
@@ -23,6 +23,8 @@ export const announcementInput = z.object({
   published: z.boolean(),
 });
 
+const releaseDate = (day: string) => new Date(`${day}T00:00:00.000+05:30`);
+
 export async function createAnnouncement(input: z.infer<typeof announcementInput>) {
   const slug = input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
   const now = new Date();
@@ -31,7 +33,7 @@ export async function createAnnouncement(input: z.infer<typeof announcementInput
       ...input,
       // Suffix keeps two same-titled posts from colliding on the unique key.
       key: `${slug || "post"}-${now.getTime().toString(36)}`,
-      releasedAt: input.releasedAt ? new Date(`${input.releasedAt}T00:00:00.000+05:30`) : now,
+      releasedAt: input.releasedAt ? releaseDate(input.releasedAt) : now,
       createdAt: now,
       updatedAt: now,
       __v: 0,
@@ -41,6 +43,24 @@ export async function createAnnouncement(input: z.infer<typeof announcementInput
   return { _id: insertedId.toHexString() };
 }
 
+/** Edit or (un)publish an announcement (SMOL-416); a cleared optional field is removed, the key never changes. */
+export async function updateAnnouncement(id: string, input: Partial<z.infer<typeof announcementInput>>) {
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  const unset: Record<string, ""> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) {
+      if (["imageUrl", "linkUrl", "linkLabel"].includes(key)) unset[key] = "";
+    } else {
+      set[key] = key === "releasedAt" ? releaseDate(String(value)) : value;
+    }
+  }
+  const { matchedCount } = await (await smolDb())
+    .collection("announcements")
+    .updateOne({ _id: new ObjectId(id) }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
+  if (!matchedCount) throw new NotFoundError("Announcement not found");
+  return { _id: id };
+}
+
 export async function setResolved(name: SmolCollectionName, id: string, resolved: boolean) {
   const now = new Date();
   const { matchedCount } = await (await smolDb())
@@ -48,6 +68,26 @@ export async function setResolved(name: SmolCollectionName, id: string, resolved
     .updateOne({ _id: new ObjectId(id) }, { $set: { resolvedAt: resolved ? now : null, updatedAt: now } });
   if (!matchedCount) throw new NotFoundError("Record not found");
   return { resolved };
+}
+
+/** Backend admin paths Flowdeck may reach; the backend re-validates every body. */
+export const ADMIN_API_PATH = /^(?:(?:stores|orders)\/[a-f\d]{24}\/[a-z]+|otp-limit(?:\/clear)?|email-budget)$/;
+
+/** Seller and order controls run in smolBusiness-backend (it owns sessions, credit lots, stock and storefront purges). */
+export async function adminApi(path: string, init: { method: "GET" | "POST"; search?: string; body?: unknown; by: string }) {
+  const base = (process.env.SMOL_BACKEND_URL || "https://smol-business-backend.vercel.app").replace(/\/$/, "");
+  const secret = process.env.SMOL_ADMIN_API_SECRET;
+  if (!secret) throw new Error("SMOL_ADMIN_API_SECRET is not set");
+  const res = await fetch(`${base}/api/internal/admin/${path}${init.search ?? ""}`, {
+    method: init.method,
+    headers: { "Content-Type": "application/json", "x-admin-secret": secret },
+    body: init.method === "POST" ? JSON.stringify({ ...(init.body as object), by: init.by }) : undefined,
+    cache: "no-store",
+  });
+  const json = (await res.json().catch(() => null)) as { data?: unknown; message?: string } | null;
+  // Backend 4xx (bad input, below-zero debit, deleted store) keep their status; anything else is a 502.
+  const status = res.ok ? 200 : res.status >= 400 && res.status < 500 && res.status !== 401 ? res.status : 502;
+  return { status, data: json?.data ?? null, message: json?.message ?? `Backend refused (${res.status})` };
 }
 
 /** Every collection holding a seller's rows, keyed by `storeId`. The store doc itself goes last. */
@@ -64,6 +104,9 @@ const SELLER_COLLECTIONS = [
   "sellerthemes",
   "featurerequests",
   "contacts",
+  "subscriptionevents",
+  "adminactions",
+  "sellernotes",
 ] as const;
 
 function r2Client() {
@@ -99,7 +142,9 @@ export async function deleteSeller(id: string, confirmDomain: string) {
   if (String(store.domain ?? "") !== confirmDomain) throw new Error("Confirmation does not match the store domain");
 
   const byStore = { storeId: { $in: [_id, id] } };
-  const phones = store.phone ? [String(store.phone), `${store.countryCode ?? ""}${store.phone}`, `+${store.countryCode ?? ""}${store.phone}`] : [];
+  // A soft delete that allowed re-signup parked the real number on the tombstone.
+  const phone = (store.deletion as { releasedPhone?: string } | null)?.releasedPhone ?? store.phone;
+  const phones = phone ? [String(phone), `${store.countryCode ?? ""}${phone}`, `+${store.countryCode ?? ""}${phone}`] : [];
   // Contacts and feature requests can predate the store, tied only to the seller's phone.
   const filters: Record<string, object> = Object.fromEntries(SELLER_COLLECTIONS.map((name) => [name, byStore]));
   if (phones.length) {
@@ -157,4 +202,36 @@ export async function deleteSeller(id: string, confirmDomain: string) {
     customDomain: hostname ?? null,
     customDomainSkipped: !!hostname && !domainRemoved,
   };
+}
+
+export const sellerNotesInput = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("add"), body: z.string().trim().min(1).max(2000) }),
+  z.object({ op: z.literal("edit"), noteId: z.string().regex(/^[a-f\d]{24}$/i), body: z.string().trim().min(1).max(2000) }),
+  z.object({ op: z.literal("delete"), noteId: z.string().regex(/^[a-f\d]{24}$/i) }),
+  z.object({ op: z.literal("tags"), tags: z.array(z.string().max(60)).max(20) }),
+]);
+
+/** Internal notes and tags on a seller (SMOL-417); one sellernotes doc per store, which sellers' APIs never read. */
+export async function updateSellerNotes(storeId: string, input: z.infer<typeof sellerNotesInput>, by: string) {
+  const db = await smolDb();
+  const col = db.collection("sellernotes");
+  const _id = new ObjectId(storeId);
+  if (!(await db.collection("stores").countDocuments({ _id }, { limit: 1 }))) throw new NotFoundError("Seller not found");
+  const now = new Date();
+  const upsert = { $setOnInsert: { storeId: _id, createdAt: now }, $set: { updatedAt: now } };
+  if (input.op === "tags") {
+    const tags = [...new Set(input.tags.map(normalizeTag).filter(Boolean))];
+    await col.updateOne({ storeId: _id }, { ...upsert, $set: { ...upsert.$set, tags } }, { upsert: true });
+  } else if (input.op === "add") {
+    await col.updateOne({ storeId: _id }, { ...upsert, $push: { notes: { _id: new ObjectId(), body: input.body, by, at: now } } } as never, { upsert: true });
+  } else {
+    // Only the author edits or deletes their own note.
+    const match = { storeId: _id, notes: { $elemMatch: { _id: new ObjectId(input.noteId), by } } };
+    const { matchedCount } =
+      input.op === "edit"
+        ? await col.updateOne(match, { $set: { "notes.$.body": input.body, "notes.$.editedAt": now, updatedAt: now } })
+        : await col.updateOne(match, { $pull: { notes: { _id: new ObjectId(input.noteId) } }, $set: { updatedAt: now } } as never);
+    if (!matchedCount) throw new NotFoundError("Note not found, or not yours");
+  }
+  return col.findOne({ storeId: _id }, { projection: { _id: 0, tags: 1, notes: 1 } });
 }

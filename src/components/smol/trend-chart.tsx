@@ -1,6 +1,6 @@
 "use client";
 
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fmtDate } from "@/components/smol/smol-ui";
 
 // Keys are "YYYY-MM" (month) or "YYYY-MM-DD"; anything else (e.g. a stale key mid-transition) renders as-is.
@@ -18,6 +18,7 @@ export default function TrendChart({
   label,
   format,
   axisFormat,
+  bars,
 }: {
   data: { key: string }[];
   dataKey: string;
@@ -25,10 +26,13 @@ export default function TrendChart({
   label: string;
   format: (value: number) => string;
   axisFormat: (value: number) => string;
+  /** Counts per period read better as bars than as a continuous area. */
+  bars?: boolean;
 }) {
+  const Chart = bars ? BarChart : AreaChart;
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+      <Chart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="smolArea" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.35} />
@@ -51,6 +55,7 @@ export default function TrendChart({
           stroke="var(--border)"
         />
         <Tooltip
+          cursor={{ fill: "var(--muted)", opacity: 0.5 }}
           labelFormatter={(key) => tickLabel(String(key), interval)}
           formatter={(value) => [format(Number(value)), label]}
           contentStyle={{
@@ -61,8 +66,12 @@ export default function TrendChart({
             color: "var(--foreground)",
           }}
         />
-        <Area type="monotone" dataKey={dataKey} stroke="var(--primary)" strokeWidth={2} fill="url(#smolArea)" />
-      </AreaChart>
+        {bars ? (
+          <Bar dataKey={dataKey} fill="var(--primary)" radius={[4, 4, 0, 0]} maxBarSize={36} />
+        ) : (
+          <Area type="monotone" dataKey={dataKey} stroke="var(--primary)" strokeWidth={2} fill="url(#smolArea)" />
+        )}
+      </Chart>
     </ResponsiveContainer>
   );
 }

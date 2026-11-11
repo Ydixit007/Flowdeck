@@ -2,10 +2,10 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Plus, RotateCcw, Search, Undo2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronLeft, ChevronRight, Plus, Rows3, Rows4, RotateCcw, Search, Undo2, X } from "lucide-react";
 import { api, qs } from "@/lib/client/api";
 import { cn } from "@/lib/utils";
-import { SMOL_ANNOUNCEMENT_TYPES, SMOL_COLLECTIONS, SMOL_RESOLVABLE, periodRange, type SmolCollectionName, type SmolColumn } from "@/lib/smol-config";
+import { SMOL_ANNOUNCEMENT_TYPES, SMOL_RESOLVABLE, periodRange, visibleCollection, type SmolCollectionName, type SmolColumn } from "@/lib/smol-config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState, Skeleton } from "@/components/ui/misc";
 import { Cell, PeriodPicker, Select, fmtDate, sellerHref, useSmol, useSmolFetch, useUrlState, type Row } from "@/components/smol/smol-ui";
+import { EmailBudget, OtpLimit } from "@/components/smol/admin-tools";
 
 interface ListResult {
   rows: Row[];
@@ -37,6 +38,50 @@ function filterOptions(name: string) {
 
 const numeric = (column: SmolColumn) => column.kind === "money" || column.kind === "number";
 
+const DESCRIPTIONS: Record<SmolCollectionName, string> = {
+  stores: "Every store on the platform, its plan and status.",
+  storelayoutrevisions: "Published storefront layouts, newest first.",
+  orders: "Buyer orders across all stores.",
+  customers: "Buyers, per store.",
+  products: "Catalogue items across all stores.",
+  reviews: "Verified-purchase reviews.",
+  coupons: "Store discount codes and their usage.",
+  billingorders: "What sellers paid the platform: packs and plans.",
+  credittransactions: "Every credit grant, charge and expiry.",
+  emailbudgets: "Platform-wide daily email sends.",
+  announcements: "Messages shown in every seller dashboard.",
+  themes: "Storefront themes available to sellers.",
+  featurerequests: "What sellers asked for.",
+  contacts: "Messages sellers sent from Settings → Contact us.",
+  adminactions: "Every change an admin made through these controls.",
+  otps: "Login and checkout codes sent.",
+};
+const MAX_STATUS_TABS = 8;
+
+/** Row density, remembered per browser. */
+const densityListeners = new Set<() => void>();
+const readCompact = () => {
+  try {
+    return window.localStorage.getItem("fd-density") === "compact";
+  } catch {
+    return false;
+  }
+};
+function useDensity() {
+  const compact = React.useSyncExternalStore(
+    (listener) => (densityListeners.add(listener), () => densityListeners.delete(listener)),
+    readCompact,
+    () => false,
+  );
+  const toggle = () => {
+    try {
+      window.localStorage.setItem("fd-density", compact ? "comfortable" : "compact");
+    } catch {}
+    densityListeners.forEach((listener) => listener());
+  };
+  return [compact, toggle] as const;
+}
+
 /** Searchable, filterable, sortable table; every control lives in the URL so views are linkable. */
 export function CollectionView({
   name,
@@ -48,12 +93,12 @@ export function CollectionView({
   lockedStoreId?: string;
   embedded?: boolean;
 }) {
-  const def = SMOL_COLLECTIONS[name];
+  const { role, meta, storeName, openRecord } = useSmol();
+  const def = visibleCollection(name, role);
   const router = useRouter();
-  const { meta, storeName, openRecord } = useSmol();
   const url = useUrlState();
 
-  const storeScoped = "storeScoped" in def;
+  const storeScoped = !!def.storeScoped;
   const storeId = lockedStoreId ?? url.get("storeId");
   const phone = url.get("phone");
   const period = url.get("period");
@@ -123,6 +168,13 @@ export function CollectionView({
   };
   const openRow = (row: Row) => (name === "stores" ? router.push(sellerHref(row._id)) : openRecord(name, row._id));
 
+  const [compact, toggleDensity] = useDensity();
+  const statusFilter = def.filters[0];
+  const statusOptions = statusFilter ? (options[statusFilter.key] ?? []) : [];
+  const statusTabs = statusOptions.length > 1 && statusOptions.length <= MAX_STATUS_TABS ? statusFilter : undefined;
+  const selectFilters = statusTabs ? def.filters.slice(1) : def.filters;
+  const cellY = compact ? "py-1.5" : "py-2.5";
+
   const total = result?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / limit));
   const chips: { label: string; clear: () => void }[] = [
@@ -130,7 +182,7 @@ export function CollectionView({
     ...(storeId && !lockedStoreId ? [{ label: `Seller: ${storeName(storeId)}`, clear: () => set({ storeId: null, page: null }) }] : []),
     ...(phone ? [{ label: `Phone: ${phone}`, clear: () => set({ phone: null, page: null }) }] : []),
     ...def.filters
-      .filter((filter) => filters[filter.key])
+      .filter((filter) => filters[filter.key] && filter.key !== statusTabs?.key)
       .map((filter) => ({ label: `${filter.label}: ${filters[filter.key]}`, clear: () => setFilter(filter.key, "") })),
     ...(period
       ? [
@@ -147,10 +199,11 @@ export function CollectionView({
       {!embedded ? (
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">{def.label}</h2>
-            <p className="text-[12px] text-muted-foreground">
-              {meta ? `${(meta.counts[name] ?? 0).toLocaleString("en-IN")} records in total` : " "} · click a row for details
-            </p>
+            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+              {def.label}
+              {meta ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-[12px] font-medium tabular-nums text-muted-foreground">{(meta.counts[name] ?? 0).toLocaleString("en-IN")}</span> : null}
+            </h2>
+            <p className="text-[12px] text-muted-foreground">{DESCRIPTIONS[name]}</p>
           </div>
           {name === "announcements" ? (
             <Button size="sm" onClick={() => setComposing(true)}>
@@ -160,7 +213,36 @@ export function CollectionView({
         </div>
       ) : null}
 
+      {!embedded && role === "superadmin" && name === "emailbudgets" ? <EmailBudget /> : null}
+      {!embedded && role === "superadmin" && name === "otps" ? (
+        <section className="fd-panel space-y-1 p-3">
+          <p className="text-[13px] font-medium">OTP send limit</p>
+          <OtpLimit />
+        </section>
+      ) : null}
+
       <section className="fd-panel overflow-hidden">
+        {statusTabs ? (
+          <nav className="fd-no-scrollbar flex gap-1 overflow-x-auto border-b border-border px-3" aria-label={statusTabs.label}>
+            {["", ...statusOptions].map((value) => {
+              const active = (filters[statusTabs.key] ?? "") === value;
+              return (
+                <button
+                  key={value || "all"}
+                  type="button"
+                  onClick={() => setFilter(statusTabs.key, value)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "-mb-px shrink-0 border-b-2 px-2.5 py-2.5 text-[13px] font-medium capitalize transition-colors",
+                    active ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {value ? value.replace(/_/g, " ") : "All"}
+                </button>
+              );
+            })}
+          </nav>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
           <div className="relative min-w-56 flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -182,7 +264,7 @@ export function CollectionView({
               ))}
             </Select>
           ) : null}
-          {def.filters.map((filter) => (
+          {selectFilters.map((filter) => (
             <Select
               key={filter.key}
               value={filters[filter.key] ?? ""}
@@ -227,14 +309,14 @@ export function CollectionView({
         <div className="fd-scroll-thin overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="text-left text-[12px] text-muted-foreground">
-              <tr className="border-b border-border bg-surface-sunken/60">
+              <tr className="border-b border-border bg-surface-sunken">
                 {columns.map((column: SmolColumn) => {
                   const active = sort === column.key;
                   const Icon = active ? (dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
                   return (
                     <th
                       key={column.key}
-                      className={cn("px-3 py-2 font-medium", numeric(column) && "text-right")}
+                      className={cn("px-3 py-2 font-medium first:sticky first:left-0 first:z-[1] first:bg-surface-sunken", numeric(column) && "text-right")}
                       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : undefined}
                     >
                       <button
@@ -267,17 +349,17 @@ export function CollectionView({
                     <tr
                       key={row._id}
                       tabIndex={0}
-                      className="cursor-pointer outline-none hover:bg-muted/50 focus-visible:bg-muted/60"
+                      className="cursor-pointer bg-surface outline-none hover:bg-muted focus-visible:bg-muted"
                       onClick={() => openRow(row)}
                       onKeyDown={(event) => event.key === "Enter" && openRow(row)}
                     >
                       {columns.map((column: SmolColumn) => (
-                        <td key={column.key} className={cn("px-3 py-2", numeric(column) && "text-right")}>
+                        <td key={column.key} className={cn("px-3 first:sticky first:left-0 first:z-[1] first:bg-inherit first:font-medium", cellY, numeric(column) && "text-right")}>
                           <Cell column={column} row={row} />
                         </td>
                       ))}
                       {resolvable ? (
-                        <td className="px-3 py-1.5 text-right">
+                        <td className="px-3 py-1 text-right">
                           <Button
                             variant={row.resolvedAt ? "ghost" : "secondary"}
                             size="sm"
@@ -312,6 +394,9 @@ export function CollectionView({
             {total === 0 ? "0 results" : `${((page - 1) * limit + 1).toLocaleString("en-IN")}–${Math.min(page * limit, total).toLocaleString("en-IN")} of ${total.toLocaleString("en-IN")}`}
           </span>
           <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon-sm" onClick={toggleDensity} aria-label={compact ? "Comfortable rows" : "Compact rows"} title={compact ? "Comfortable rows" : "Compact rows"}>
+              {compact ? <Rows3 /> : <Rows4 />}
+            </Button>
             <Select value={limit} onChange={(event) => set({ limit: event.target.value, page: null })} aria-label="Rows per page">
               {[25, 50, 100].map((size) => (
                 <option key={size} value={size}>
@@ -332,13 +417,15 @@ export function CollectionView({
         </footer>
       </section>
       {name === "announcements" ? (
-        <AnnouncementDialog open={composing} onClose={() => setComposing(false)} onCreated={reload} />
+        <AnnouncementDialog open={composing} onClose={() => setComposing(false)} onSaved={reload} />
       ) : null}
     </div>
   );
 }
 
-function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+/** Create, or with `initial` edit (SMOL-416); a cleared optional field is removed. */
+export function AnnouncementDialog({ open, onClose, onSaved, initial }: { open: boolean; onClose: () => void; onSaved: () => void; initial?: Row }) {
+  const text = (key: string) => (typeof initial?.[key] === "string" ? String(initial[key]) : undefined);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -348,8 +435,10 @@ function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClo
     setSaving(true);
     setError(null);
     try {
-      await api.post("/api/smol/announcements", { ...Object.fromEntries(form), published: form.get("published") === "on" });
-      onCreated();
+      const body = { ...Object.fromEntries(form), published: form.get("published") === "on" };
+      if (initial) await api.patch(`/api/smol/announcements/${initial._id}`, body);
+      else await api.post("/api/smol/announcements", body);
+      onSaved();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
@@ -363,20 +452,20 @@ function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClo
       <DialogContent size="lg">
         <form onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>New announcement</DialogTitle>
+            <DialogTitle>{initial ? "Edit announcement" : "New announcement"}</DialogTitle>
           </DialogHeader>
           <DialogBody className="grid gap-3 text-[13px] sm:grid-cols-2">
             <div className="space-y-1 sm:col-span-2">
               <Label htmlFor="a-title">Title</Label>
-              <Input id="a-title" name="title" required maxLength={140} />
+              <Input id="a-title" name="title" required maxLength={140} defaultValue={text("title")} />
             </div>
             <div className="space-y-1 sm:col-span-2">
               <Label htmlFor="a-content">Content</Label>
-              <Textarea id="a-content" name="content" required maxLength={4000} rows={5} />
+              <Textarea id="a-content" name="content" required maxLength={4000} rows={5} defaultValue={text("content")} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="a-type">Type</Label>
-              <Select id="a-type" name="type" defaultValue="feature" className="w-full">
+              <Select id="a-type" name="type" defaultValue={text("type") ?? "feature"} className="w-full">
                 {SMOL_ANNOUNCEMENT_TYPES.map((type) => (
                   <option key={type} value={type}>
                     {type}
@@ -386,7 +475,7 @@ function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClo
             </div>
             <div className="space-y-1">
               <Label htmlFor="a-released">Released</Label>
-              <Input id="a-released" name="releasedAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+              <Input id="a-released" name="releasedAt" type="date" defaultValue={initial ? fmtDate(initial.releasedAt, "yyyy-MM-dd") : new Date().toISOString().slice(0, 10)} />
             </div>
             <div className="space-y-1">
               <Label htmlFor="a-link">Link URL (optional)</Label>
@@ -394,6 +483,7 @@ function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClo
                 id="a-link"
                 name="linkUrl"
                 maxLength={2048}
+                defaultValue={text("linkUrl")}
                 placeholder="/seller/dashboard/… or https://…"
                 pattern="(/(?!/)|https?://)\S*"
                 title="A /path in the seller dashboard or an http(s) URL"
@@ -401,14 +491,14 @@ function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClo
             </div>
             <div className="space-y-1">
               <Label htmlFor="a-label">Link label</Label>
-              <Input id="a-label" name="linkLabel" maxLength={40} />
+              <Input id="a-label" name="linkLabel" maxLength={40} defaultValue={text("linkLabel")} />
             </div>
             <div className="space-y-1 sm:col-span-2">
               <Label htmlFor="a-image">Image URL (optional)</Label>
-              <Input id="a-image" name="imageUrl" type="url" maxLength={2048} />
+              <Input id="a-image" name="imageUrl" type="url" maxLength={2048} defaultValue={text("imageUrl")} />
             </div>
             <label className="flex items-center gap-2 sm:col-span-2">
-              <input type="checkbox" name="published" defaultChecked /> Publish now (unchecked = draft, hidden from sellers)
+              <input type="checkbox" name="published" defaultChecked={initial ? initial.published === true : true} /> Published (unchecked = draft, hidden from sellers)
             </label>
             {error ? <p className="text-destructive sm:col-span-2">{error}</p> : null}
           </DialogBody>
@@ -417,7 +507,7 @@ function AnnouncementDialog({ open, onClose, onCreated }: { open: boolean; onClo
               Cancel
             </Button>
             <Button type="submit" disabled={saving}>
-              {saving ? "Saving…" : "Create"}
+              {saving ? "Saving…" : initial ? "Save" : "Create"}
             </Button>
           </DialogFooter>
         </form>

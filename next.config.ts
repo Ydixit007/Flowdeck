@@ -10,7 +10,7 @@ const config: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "6mb" },
     // Tree-shakes barrel imports so a single icon does not pull the whole pack.
-    optimizePackageImports: ["lucide-react", "recharts", "date-fns", "date-fns-tz", "cmdk"],
+    optimizePackageImports: ["lucide-react", "recharts", "date-fns"],
   },
   async headers() {
     return [
@@ -18,7 +18,6 @@ const config: NextConfig = {
         source: "/sw.js",
         headers: [
           { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
-          { key: "Service-Worker-Allowed", value: "/" },
         ],
       },
       {

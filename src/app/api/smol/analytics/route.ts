@@ -1,10 +1,10 @@
 import { fail, handleError, ok, parseQuery } from "@/lib/api";
-import { requireSmolAdmin } from "@/server/smol";
+import { requireAdmin } from "@/server/smol";
 import { posthogConfigured, smolAnalytics, smolAnalyticsQuery } from "@/server/smol-posthog";
 
 export async function GET(request: Request) {
   try {
-    await requireSmolAdmin();
+    await requireAdmin("superadmin");
     if (!posthogConfigured()) return ok({ configured: false as const });
     const query = parseQuery(request, smolAnalyticsQuery);
     try {

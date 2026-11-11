@@ -3,7 +3,6 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
-import { randomBytes, createHash } from "node:crypto";
 import { connectDB } from "@/lib/db";
 import { User, type UserDoc } from "@/models/User";
 
@@ -67,8 +66,7 @@ async function readSession(): Promise<SessionPayload | null> {
 
 export type AuthUser = Omit<UserDoc, "passwordHash">;
 
-/** Returns the authenticated user, or null. Revalidates sessionEpoch so a
- *  password change invalidates every previously issued cookie. */
+/** Authenticated user or null; sessionEpoch revalidation means a password or role change ends every old session. */
 export const getCurrentUser = cache(async function getCurrentUser(): Promise<AuthUser | null> {
   const session = await readSession();
   if (!session) return null;
@@ -104,17 +102,4 @@ export class NotFoundError extends Error {
     super(message);
     this.name = "NotFoundError";
   }
-}
-
-export function createResetToken(): { token: string; tokenHash: string; expiresAt: Date } {
-  const token = randomBytes(32).toString("hex");
-  return {
-    token,
-    tokenHash: createHash("sha256").update(token).digest("hex"),
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-  };
-}
-
-export function hashResetToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
 }

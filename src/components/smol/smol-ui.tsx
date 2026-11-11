@@ -12,6 +12,7 @@ import {
   SMOL_PERIODS,
   getPath,
   periodRange,
+  type AdminRole,
   type SmolCollectionName,
   type SmolColumn,
 } from "@/lib/smol-config";
@@ -43,7 +44,7 @@ export function fmtDate(value: unknown, pattern = "d MMM yy, HH:mm"): string {
 
 export function badgeVariant(value: string) {
   if (/^(paid|delivered|active|approved|true|confirmed|grant|topup|published|ok)$/i.test(value)) return "success" as const;
-  if (/^(pending|processing|shipped|past_due|paused|low)$/i.test(value)) return "warning" as const;
+  if (/^(pending|processing|shipped|past_due|paused|disabled|low)$/i.test(value)) return "warning" as const;
   if (/^(cancelled|refunded|failed|rejected|expired|charge|deleted|blocked|abandoned)$/i.test(value)) return "danger" as const;
   if (/^(starter|growth|pro)$/i.test(value)) return "primary" as const;
   return "default" as const;
@@ -54,12 +55,16 @@ export const sellerHref = (id: string) => `/smol/seller/${id}`;
 // ─── Context: seller names + global record dialog ──────────────────────────
 
 interface SmolContextValue {
+  role: AdminRole;
+  email: string;
   meta: SmolMeta | null;
   storeName: (id: string) => string;
   openRecord: (name: SmolCollectionName, id: string) => void;
 }
 
 export const SmolContext = React.createContext<SmolContextValue>({
+  role: "marketing",
+  email: "",
   meta: null,
   storeName: (id) => id.slice(-6),
   openRecord: () => undefined,
@@ -211,7 +216,9 @@ export function Panel({
 export function Delta({ current, previous, invert }: { current: number; previous?: number | null; invert?: boolean }) {
   if (previous === undefined || previous === null) return null;
   if (previous === 0 && current === 0) return <span className="text-[11px] text-muted-foreground">no change</span>;
-  const change = previous === 0 ? null : ((current - previous) / previous) * 100;
+  // Below 10 a percentage is noise (1 → 45 reads as +4400%), so show the absolute change.
+  const change = Math.abs(previous) < 10 ? null : ((current - previous) / previous) * 100;
+  const diff = current - previous;
   const up = current >= previous;
   const good = invert ? !up : up;
   const Icon = up ? ArrowUpRight : ArrowDownRight;
@@ -224,7 +231,7 @@ export function Delta({ current, previous, invert }: { current: number; previous
       title={`Previous period: ${previous.toLocaleString("en-IN")}`}
     >
       <Icon className="size-3" />
-      {change === null ? "new" : `${Math.abs(change).toFixed(change > -10 && change < 10 ? 1 : 0)}%`}
+      {change === null ? `${diff > 0 ? "+" : ""}${diff.toLocaleString("en-IN")}` : `${Math.abs(change).toFixed(change > -10 && change < 10 ? 1 : 0)}%`}
     </span>
   );
 }
@@ -445,10 +452,13 @@ export function RecordDialog({
   target,
   onClose,
   onOpen,
+  actions,
 }: {
   target: { name: SmolCollectionName; id: string } | null;
   onClose: () => void;
   onOpen: (name: SmolCollectionName, id: string) => void;
+  /** Per-collection admin actions, injected so this file stays free of them. */
+  actions?: (name: SmolCollectionName, doc: Row, reload: () => void) => React.ReactNode;
 }) {
   const { storeName } = useSmol();
   const fetched = useSmolFetch<{ doc: Row; related: Record<string, unknown> | null }>(target ? `/api/smol/${target.name}/${target.id}` : null);
@@ -472,6 +482,8 @@ export function RecordDialog({
         <DialogBody className="fd-scroll-thin max-h-[75dvh] space-y-4 overflow-y-auto">
           {error ? <p className="text-[13px] text-destructive">{error}</p> : null}
           {!doc && !error ? <Skeleton className="h-40 w-full" /> : null}
+
+          {doc && target && actions ? actions(target.name, doc, () => void fetched.reload()) : null}
 
           {storeId ? (
             <Button asChild variant="secondary" size="sm" onClick={onClose}>

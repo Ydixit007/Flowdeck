@@ -1,14 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC_PAGES = ["/login", "/register", "/forgot-password", "/reset-password"];
+const PUBLIC_PAGES = ["/login", "/forgot-password", "/reset-password"];
 const COOKIE_NAME = "flowdeck_session";
 
-/**
- * Cheap edge gate: valid cookie signature only. Real authorization (epoch
- * revalidation, membership, ownership) always happens server-side in the
- * route handlers and server components.
- */
+/** Cheap edge gate (cookie signature only); role and epoch checks happen server-side in every route and layout. */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(COOKIE_NAME)?.value;
@@ -43,5 +39,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icons|offline).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|sw.js|icons).*)"],
 };

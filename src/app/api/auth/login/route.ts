@@ -16,11 +16,12 @@ export async function POST(request: NextRequest) {
     const { email, password } = await parseBody(request, loginSchema);
     await connectDB();
 
-    const user = await User.findOne({ email }).select("+passwordHash sessionEpoch").lean();
+    const user = await User.findOne({ email }).select("+passwordHash sessionEpoch role").lean();
     // Same response either way so the endpoint cannot enumerate accounts.
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       return fail("Invalid email or password", "INVALID_CREDENTIALS", 401);
     }
+    if (!user.role) return fail("This account has no admin access", "FORBIDDEN", 403);
 
     await createSession(user._id.toString(), user.sessionEpoch ?? 0);
     await User.updateOne({ _id: user._id }, { $set: { lastSeenAt: new Date() } });
